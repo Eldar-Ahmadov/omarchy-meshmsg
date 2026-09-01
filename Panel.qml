@@ -133,7 +133,7 @@ Panel {
     open: root.opened
     focusTarget: mesh.running ? messageField : (root.showJoin ? inviteField : null)
     contentWidth: panel.fittedContentWidth(Style.space(645))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(620))
+    contentHeight: panel.fittedContentHeight(content.implicitHeight + Style.space(28), Style.space(620))
 
     Rectangle {
       id: chatSurfaceBorder
@@ -155,7 +155,9 @@ Panel {
 
     ColumnLayout {
       id: content
-      width: parent.width
+      x: Style.space(14)
+      y: Style.space(14)
+      width: parent.width - Style.space(28)
       spacing: Style.space(12)
       visible: !root.settingsOpen || chatRotation.angle > -89.9
       opacity: 1.0 - Math.abs(chatRotation.angle) / 90.0

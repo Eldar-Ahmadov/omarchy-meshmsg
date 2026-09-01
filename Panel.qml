@@ -53,6 +53,20 @@ Panel {
     if (messageList.count > 0) messageList.positionViewAtEnd()
   }
 
+  function setSettingsSurface(open) {
+    settingsOpen = open
+    if (open) {
+      chatFocusTimer.stop()
+      messageField.focus = false
+      inviteField.focus = false
+      mesh.refresh()
+      Qt.callLater(function() { statusSurface.forceActiveFocus() })
+    } else {
+      statusSurface.focus = false
+      if (mesh.running) chatFocusTimer.restart()
+    }
+  }
+
   onOpenedChanged: if (opened) {
     settingsOpen = false
     unread = 0
@@ -93,7 +107,7 @@ Panel {
     function refresh(): string { mesh.refresh(); return "ok" }
     function start(): string { mesh.startDaemon(); return "ok" }
     function stop(): string { mesh.stopDaemon(); return "ok" }
-    function settings(): string { root.open(); root.settingsOpen = true; mesh.refresh(); return "ok" }
+    function settings(): string { root.open(); root.setSettingsSurface(true); return "ok" }
     function copyInvite(): string { return mesh.copyInvite() ? "ok" : "unavailable" }
     function status(): string {
       return JSON.stringify({ running: mesh.running, connected: mesh.topicJoined, neighbors: mesh.neighbors, peer: mesh.peer })
@@ -105,7 +119,7 @@ Panel {
     context: Qt.ApplicationShortcut
     enabled: root.opened
     onActivated: {
-      if (root.settingsOpen) root.settingsOpen = false
+      if (root.settingsOpen) root.setSettingsSurface(false)
       else root.close()
     }
   }
@@ -114,11 +128,14 @@ Panel {
     sequence: "Tab"
     context: Qt.ApplicationShortcut
     enabled: root.opened
-    onActivated: {
-      root.settingsOpen = !root.settingsOpen
-      if (root.settingsOpen) mesh.refresh()
-      else if (mesh.running) Qt.callLater(function() { messageField.forceActiveFocus() })
-    }
+    onActivated: root.setSettingsSurface(!root.settingsOpen)
+  }
+
+  Timer {
+    id: chatFocusTimer
+    interval: 240
+    repeat: false
+    onTriggered: if (root.opened && !root.settingsOpen && mesh.running) messageField.forceActiveFocus()
   }
 
   Shortcut {
@@ -232,10 +249,7 @@ Panel {
           tooltipText: "Meshmsg status"
           foreground: root.foreground
           fontFamily: root.fontFamily
-          onClicked: {
-            mesh.refresh()
-            root.settingsOpen = true
-          }
+          onClicked: root.setSettingsSurface(true)
         }
 
         Button {
@@ -544,7 +558,7 @@ Panel {
             tooltipText: "Back to chat"
             foreground: root.foreground
             fontFamily: root.fontFamily
-            onClicked: root.settingsOpen = false
+            onClicked: root.setSettingsSurface(false)
           }
 
           ColumnLayout {

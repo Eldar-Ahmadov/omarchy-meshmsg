@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "eldar.meshmsg",
   "name": "Meshmsg Chat",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Eldar",
   "license": "MIT",
   "description": "Chat over the local meshmsg peer-to-peer daemon from the Omarchy bar.",

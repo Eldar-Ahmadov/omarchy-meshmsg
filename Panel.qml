@@ -60,7 +60,6 @@ Panel {
     mesh.refresh()
     Qt.callLater(function() {
       root.scrollToBottom()
-      if (mesh.running) messageField.forceActiveFocus()
     })
   }
 
@@ -93,6 +92,8 @@ Panel {
     function refresh(): string { mesh.refresh(); return "ok" }
     function start(): string { mesh.startDaemon(); return "ok" }
     function stop(): string { mesh.stopDaemon(); return "ok" }
+    function settings(): string { root.open(); root.settingsOpen = true; mesh.refresh(); return "ok" }
+    function copyInvite(): string { return mesh.copyInvite() ? "ok" : "unavailable" }
     function status(): string {
       return JSON.stringify({ running: mesh.running, connected: mesh.topicJoined, neighbors: mesh.neighbors, peer: mesh.peer })
     }
@@ -106,6 +107,23 @@ Panel {
       if (root.settingsOpen) root.settingsOpen = false
       else root.close()
     }
+  }
+
+  Shortcut {
+    sequence: "S"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && !messageField.activeFocus && !inviteField.activeFocus
+    onActivated: {
+      root.settingsOpen = !root.settingsOpen
+      if (root.settingsOpen) mesh.refresh()
+    }
+  }
+
+  Shortcut {
+    sequence: "C"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && root.settingsOpen && mesh.hasInvite && !mesh.copyingInvite
+    onActivated: mesh.copyInvite()
   }
 
   WidgetButton {
@@ -467,7 +485,7 @@ Panel {
         Layout.fillWidth: true
         Text {
           Layout.fillWidth: true
-          text: "ESC  CLOSE · ENTER  SEND"
+          text: "ESC  CLOSE · S  SETTINGS · ENTER  SEND"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -607,12 +625,27 @@ Panel {
           }
         }
 
-        Text {
+        RowLayout {
           Layout.fillWidth: true
-          text: "ESC  BACK"
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          spacing: Style.space(10)
+
+          Text {
+            Layout.fillWidth: true
+            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "ESC  BACK · S  CHAT · C  COPY INVITE"
+            color: mesh.inviteCopyError !== "" ? root.urgent : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+
+          PanelActionButton {
+            iconText: mesh.inviteCopied ? "✓" : "󰆏"
+            tooltipText: mesh.inviteCopied ? "Invite copied" : (mesh.hasInvite ? "Copy invite" : "Invite unavailable")
+            foreground: mesh.inviteCopied ? root.accent : root.foreground
+            fontFamily: root.fontFamily
+            enabled: mesh.hasInvite && !mesh.copyingInvite
+            onClicked: mesh.copyInvite()
+          }
         }
       }
     }

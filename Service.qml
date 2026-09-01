@@ -28,8 +28,12 @@ Item {
   property bool stopping: false
   property bool joining: false
   property bool sending: false
+  property bool copyingInvite: false
+  property bool inviteCopied: false
+  property string inviteCopyError: ""
 
   property string _joinToken: ""
+  property string _inviteToken: ""
   property string _sendBody: ""
   property string _statusOutput: ""
   property string _statusError: ""
@@ -39,6 +43,8 @@ Item {
   property string _joinError: ""
   property string _actionOutput: ""
   property string _actionError: ""
+  property string _inviteOutput: ""
+  property string _inviteError: ""
 
   readonly property int refreshIntervalSec: boundedInt("refreshIntervalSec", 5, 2, 60)
   readonly property int maxMessages: boundedInt("maxMessages", 100, 20, 500)
@@ -193,6 +199,18 @@ Item {
     return true
   }
 
+  function copyInvite() {
+    if (!installed || !hasInvite || copyingInvite) return false
+    _inviteOutput = ""
+    _inviteError = ""
+    inviteCopyError = ""
+    inviteCopied = false
+    copyingInvite = true
+    inviteProcess.command = [binaryPath, "--json", "invite"]
+    inviteProcess.running = true
+    return true
+  }
+
   function clearMessages() {
     messages = []
   }
@@ -229,6 +247,13 @@ Item {
     interval: 2600
     repeat: false
     onTriggered: root.actionStatus = ""
+  }
+
+  Timer {
+    id: inviteCopiedClear
+    interval: 1500
+    repeat: false
+    onTriggered: root.inviteCopied = false
   }
 
   Process {
@@ -318,6 +343,55 @@ Item {
         root.actionStatus = "Daemon stopped"
         root.setUnavailable("Daemon stopped")
         actionClear.restart()
+      }
+    }
+  }
+
+  Process {
+    id: inviteProcess
+    stdout: SplitParser { onRead: function(line) { root._inviteOutput = String(line || "") } }
+    stderr: StdioCollector { waitForEnd: true; onStreamFinished: root._inviteError = text }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) {
+        root.copyingInvite = false
+        root.inviteCopyError = root.cleanError(root._inviteError || root._inviteOutput, "Could not read invite")
+        return
+      }
+      try {
+        var value = JSON.parse(String(root._inviteOutput || "").trim())
+        var token = String(value.token || "")
+        if (value.type !== "invite" || token === "") throw new Error("missing invite token")
+        root._inviteOutput = ""
+        root._inviteToken = token
+        clipboardProcess.stdinEnabled = true
+        clipboardProcess.command = ["wl-copy"]
+        clipboardProcess.running = true
+      } catch (error) {
+        root.copyingInvite = false
+        root.inviteCopyError = "Could not parse meshmsg invite"
+      }
+    }
+  }
+
+  Process {
+    id: clipboardProcess
+    stdinEnabled: true
+    stderr: StdioCollector { waitForEnd: true; onStreamFinished: root._inviteError = text }
+    onStarted: {
+      write(root._inviteToken)
+      root._inviteToken = ""
+      stdinEnabled = false
+    }
+    onExited: function(exitCode) {
+      stdinEnabled = true
+      root._inviteToken = ""
+      root.copyingInvite = false
+      if (exitCode === 0) {
+        root.inviteCopyError = ""
+        root.inviteCopied = true
+        inviteCopiedClear.restart()
+      } else {
+        root.inviteCopyError = root.cleanError(root._inviteError, "Could not copy invite")
       }
     }
   }

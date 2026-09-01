@@ -6,6 +6,7 @@ An Omarchy bar widget and chat panel backed by the local [`meshmsg`](https://git
 
 - live status and peer count
 - animated status surface with daemon, endpoint, topic, invite, bootstrap, identity, and IPC details
+- keyboard shortcuts: `S` toggles status/settings and `C` copies the invite while that surface is open
 - incoming and outgoing chat messages
 - unread counter in the bar
 - daemon start/stop controls

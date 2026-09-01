@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "eldar.meshmsg",
+  "name": "Meshmsg Chat",
+  "version": "1.0.0",
+  "author": "Eldar",
+  "license": "MIT",
+  "description": "Chat over the local meshmsg peer-to-peer daemon from the Omarchy bar.",
+  "kinds": ["bar-widget"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Meshmsg Chat",
+    "description": "Read and send meshmsg messages, manage the daemon, and join an existing chat.",
+    "category": "Network",
+    "aliases": ["meshmsg", "chat", "mesh"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 5,
+      "maxMessages": 100
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Status refresh interval (seconds)",
+        "min": 2,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 5
+      },
+      {
+        "key": "maxMessages",
+        "type": "integer",
+        "label": "Messages kept in memory",
+        "min": 20,
+        "max": 500,
+        "step": 20,
+        "defaultValue": 100
+      }
+    ]
+  }
+}

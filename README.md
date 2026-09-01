@@ -11,7 +11,9 @@ An Omarchy bar widget and chat panel backed by the local [`meshmsg`](https://git
 - join an existing chat using an invite capability
 - bounded in-memory message history (not persisted by the plugin)
 
-The plugin uses `meshmsg --json listen`, `status`, and `send`. Starting the daemon respects an existing `meshmsg.service`; otherwise it creates a supervised transient systemd user unit.
+The plugin uses the current top-level meshmsg commands (`daemon`, `join`, `listen`, `status`, `send`, and `stop`). It is compatible with meshmsg's equal-peer model introduced in v0.1.4; there is no seed/member service distinction.
+
+Starting the daemon installs and enables a persistent systemd user unit at `~/.config/systemd/user/meshmsg.service`. The unit starts again after reboot when the user session starts and resolves the supported meshmsg binary on every launch, so binary upgrades do not leave a stale `ExecStart` path. An existing user-managed persistent `meshmsg.service` is respected and never overwritten.
 
 ## Security
 
@@ -19,6 +21,26 @@ Meshmsg is currently a trusted **plaintext** swarm. Anyone with an invite can re
 
 ## Requirements
 
-- `meshmsg` on `PATH`
+- meshmsg v0.1.4 or newer, preferably installed at `~/.local/bin/meshmsg`
 - a systemd user session
 - initialized or joined meshmsg state before starting, or an invite entered in the panel
+
+Install the latest verified release with the upstream installer:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/Eldar-Ahmadov/meshmsg/main/install.sh | bash
+```
+
+Meshmsg v0.1.4 intentionally breaks compatibility with earlier state and invite formats. Reinitialize with `meshmsg init` or join again after upgrading; old state is not migrated.
+
+## Persistent daemon
+
+Clicking **Start** in the panel installs, enables, and starts the user service. You can manage it directly with:
+
+```sh
+systemctl --user status meshmsg.service
+systemctl --user restart meshmsg.service
+journalctl --user -u meshmsg.service -f
+```
+
+The enabled user unit starts at login after a reboot. Running it before login or after logout additionally requires user lingering, which is a separate administrator-controlled setting.

@@ -152,7 +152,7 @@ Item {
     lastError = ""
     actionStatus = "Starting daemon…"
     starting = true
-    startProcess.command = [Quickshell.env("HOME") + "/.config/omarchy/plugins/eldar.meshmsg/start-daemon.sh", binaryPath]
+    startProcess.command = [Quickshell.env("HOME") + "/.config/omarchy/plugins/eldar.meshmsg/start-daemon.sh"]
     startProcess.running = true
   }
 

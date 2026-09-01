@@ -1,0 +1,16 @@
+[Unit]
+Description=meshmsg peer daemon
+Documentation=https://github.com/Eldar-Ahmadov/meshmsg
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+ExecStart=%h/.config/omarchy/plugins/eldar.meshmsg/run-daemon.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

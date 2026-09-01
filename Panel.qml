@@ -1307,9 +1307,12 @@ Panel {
       onClicked: root.copyStatusValue(parent.value, parent.copyKey)
     }
 
-    Button {
+    PanelActionButton {
       visible: parent.openable
-      text: "Open"
+      iconText: "󰋜"
+      tooltipText: "Open state directory"
+      foreground: root.dim
+      fontFamily: root.fontFamily
       onClicked: root.openStateDir()
     }
 

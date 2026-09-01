@@ -60,6 +60,7 @@ Panel {
     mesh.refresh()
     Qt.callLater(function() {
       root.scrollToBottom()
+      if (mesh.running) messageField.forceActiveFocus()
     })
   }
 
@@ -110,12 +111,13 @@ Panel {
   }
 
   Shortcut {
-    sequence: "S"
+    sequence: "Ctrl+S"
     context: Qt.ApplicationShortcut
-    enabled: root.opened && !messageField.activeFocus && !inviteField.activeFocus
+    enabled: root.opened
     onActivated: {
       root.settingsOpen = !root.settingsOpen
       if (root.settingsOpen) mesh.refresh()
+      else if (mesh.running) Qt.callLater(function() { messageField.forceActiveFocus() })
     }
   }
 
@@ -485,7 +487,7 @@ Panel {
         Layout.fillWidth: true
         Text {
           Layout.fillWidth: true
-          text: "ESC  CLOSE · S  SETTINGS · ENTER  SEND"
+          text: "ESC  CLOSE · CTRL+S  SETTINGS · ENTER  SEND"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -631,7 +633,7 @@ Panel {
 
           Text {
             Layout.fillWidth: true
-            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "ESC  BACK · S  CHAT · C  COPY INVITE"
+            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "ESC  BACK · CTRL+S  CHAT · C  COPY INVITE"
             color: mesh.inviteCopyError !== "" ? root.urgent : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

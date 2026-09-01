@@ -173,6 +173,12 @@ Panel {
     copiedStatusClear.restart()
   }
 
+  function openStateDir() {
+    var path = String(mesh.stateDir || "")
+    if (path === "") return
+    Quickshell.execDetached(["uwsm-app", "--", "xdg-terminal-exec", "--dir=" + path])
+  }
+
   function setSettingsSurface(open) {
     settingsOpen = open
     if (open) {
@@ -1000,7 +1006,7 @@ Panel {
 
               StatusRow { label: "PEER ID"; value: mesh.peer || "—"; wrapValue: true; copyable: mesh.peer !== ""; copyKey: "peer" }
               StatusRow { label: "TOPIC ID"; value: mesh.topic || "—"; wrapValue: true; copyable: mesh.topic !== ""; copyKey: "topic" }
-              StatusRow { label: "STATE DIR"; value: mesh.stateDir || "—"; wrapValue: true; copyable: mesh.stateDir !== ""; copyKey: "state-dir" }
+              StatusRow { label: "STATE DIR"; value: mesh.stateDir || "—"; wrapValue: true; openable: mesh.stateDir !== "" }
               StatusRow {
                 label: "UPDATED"
                 value: mesh.statusUpdatedAt > 0 ? Qt.formatDateTime(new Date(mesh.statusUpdatedAt), "yyyy-MM-dd HH:mm:ss") : "—"
@@ -1277,6 +1283,7 @@ Panel {
     property bool wrapValue: false
     property bool copyable: false
     property string copyKey: ""
+    property bool openable: false
 
     Layout.fillWidth: true
     spacing: Style.space(16)
@@ -1298,6 +1305,12 @@ Panel {
       foreground: root.copiedStatusKey === parent.copyKey ? root.accent : root.dim
       fontFamily: root.fontFamily
       onClicked: root.copyStatusValue(parent.value, parent.copyKey)
+    }
+
+    Button {
+      visible: parent.openable
+      text: "Open"
+      onClicked: root.openStateDir()
     }
 
     Text {

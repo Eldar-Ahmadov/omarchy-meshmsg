@@ -24,6 +24,7 @@ Panel {
   property var clipboardHistory: []
   property int clipboardIndex: 0
   property bool messageCursorActive: false
+  property string copiedStatusKey: ""
   property int previousMessageCount: 0
   readonly property var displayedMessages: filterMessages(mesh.messages, searchQuery)
   readonly property var displayedClipboard: filterClipboard(clipboardHistory, clipboardQuery)
@@ -162,6 +163,14 @@ Panel {
       clipboardSearchField.focus = false
       if (mesh.running) chatFocusTimer.restart()
     }
+  }
+
+  function copyStatusValue(value, key) {
+    var text = String(value || "")
+    if (text === "") return
+    Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(text) + " | wl-copy"])
+    copiedStatusKey = key
+    copiedStatusClear.restart()
   }
 
   function setSettingsSurface(open) {
@@ -317,6 +326,13 @@ Panel {
     onTriggered: if (root.opened && !root.settingsOpen && !root.clipboardOpen && mesh.running) messageField.forceActiveFocus()
   }
 
+  Timer {
+    id: copiedStatusClear
+    interval: 1200
+    repeat: false
+    onTriggered: root.copiedStatusKey = ""
+  }
+
   Shortcut {
     sequence: "C"
     context: Qt.ApplicationShortcut
@@ -446,16 +462,6 @@ Panel {
           enabled: !mesh.busy
           onClicked: mesh.running ? mesh.stopDaemon() : mesh.startDaemon()
         }
-      }
-
-      Text {
-        visible: mesh.peer !== ""
-        Layout.fillWidth: true
-        text: "peer · " + mesh.shortPeer(mesh.peer) + (mesh.topic !== "" ? " · topic " + mesh.shortPeer(mesh.topic) : "")
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideMiddle
       }
 
       Text {
@@ -992,8 +998,8 @@ Panel {
 
               PanelSeparator { Layout.fillWidth: true; foreground: root.foreground }
 
-              StatusRow { label: "PEER ID"; value: mesh.peer || "—"; wrapValue: true }
-              StatusRow { label: "TOPIC ID"; value: mesh.topic || "—"; wrapValue: true }
+              StatusRow { label: "PEER ID"; value: mesh.peer || "—"; wrapValue: true; copyable: mesh.peer !== ""; copyKey: "peer" }
+              StatusRow { label: "TOPIC ID"; value: mesh.topic || "—"; wrapValue: true; copyable: mesh.topic !== ""; copyKey: "topic" }
               StatusRow { label: "LOCAL IPC"; value: mesh.localEndpoint || "—"; wrapValue: true }
               StatusRow { label: "BINARY"; value: mesh.binaryPath || "—"; wrapValue: true }
               StatusRow {
@@ -1270,6 +1276,8 @@ Panel {
     property string value: "—"
     property color valueColor: root.foreground
     property bool wrapValue: false
+    property bool copyable: false
+    property string copyKey: ""
 
     Layout.fillWidth: true
     spacing: Style.space(16)
@@ -1282,6 +1290,15 @@ Panel {
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       font.bold: true
+    }
+
+    PanelActionButton {
+      visible: parent.copyable
+      iconText: root.copiedStatusKey === parent.copyKey ? "✓" : "󰆏"
+      tooltipText: root.copiedStatusKey === parent.copyKey ? "Copied" : "Copy " + parent.label.toLowerCase()
+      foreground: root.copiedStatusKey === parent.copyKey ? root.accent : root.dim
+      fontFamily: root.fontFamily
+      onClicked: root.copyStatusValue(parent.value, parent.copyKey)
     }
 
     Text {

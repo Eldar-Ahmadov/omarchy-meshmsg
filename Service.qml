@@ -20,6 +20,13 @@ Item {
   property string topic: ""
   property string localEndpoint: ""
   property double statusUpdatedAt: 0
+  readonly property string stateDir: {
+    var configured = Quickshell.env("MESHMSG_STATE_DIR")
+    if (configured) return configured
+    var dataHome = Quickshell.env("XDG_DATA_HOME")
+    if (!dataHome) dataHome = Quickshell.env("HOME") + "/.local/share"
+    return dataHome + "/meshmsg"
+  }
   property string statusText: "Checking…"
   property string lastError: ""
   property string actionStatus: ""

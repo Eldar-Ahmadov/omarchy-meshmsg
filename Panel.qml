@@ -1000,8 +1000,7 @@ Panel {
 
               StatusRow { label: "PEER ID"; value: mesh.peer || "—"; wrapValue: true; copyable: mesh.peer !== ""; copyKey: "peer" }
               StatusRow { label: "TOPIC ID"; value: mesh.topic || "—"; wrapValue: true; copyable: mesh.topic !== ""; copyKey: "topic" }
-              StatusRow { label: "LOCAL IPC"; value: mesh.localEndpoint || "—"; wrapValue: true }
-              StatusRow { label: "BINARY"; value: mesh.binaryPath || "—"; wrapValue: true }
+              StatusRow { label: "STATE DIR"; value: mesh.stateDir || "—"; wrapValue: true; copyable: mesh.stateDir !== ""; copyKey: "state-dir" }
               StatusRow {
                 label: "UPDATED"
                 value: mesh.statusUpdatedAt > 0 ? Qt.formatDateTime(new Date(mesh.statusUpdatedAt), "yyyy-MM-dd HH:mm:ss") : "—"

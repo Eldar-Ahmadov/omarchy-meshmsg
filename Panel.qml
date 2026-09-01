@@ -139,6 +139,19 @@ Panel {
       id: content
       width: parent.width
       spacing: Style.space(12)
+      visible: !root.settingsOpen || chatRotation.angle > -89.9
+      opacity: 1.0 - Math.abs(chatRotation.angle) / 90.0
+
+      transform: Rotation {
+        id: chatRotation
+        origin.x: content.width / 2
+        origin.y: content.height / 2
+        axis { x: 0; y: 1; z: 0 }
+        angle: root.settingsOpen ? -90 : 0
+        Behavior on angle {
+          NumberAnimation { duration: 220; easing.type: Easing.InOutQuad }
+        }
+      }
 
       RowLayout {
         Layout.fillWidth: true

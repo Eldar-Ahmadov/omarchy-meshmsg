@@ -302,26 +302,43 @@ Panel {
         visible: mesh.installed && mesh.running
         Layout.fillWidth: true
         Layout.preferredHeight: Style.space(360)
-        radius: Style.cornerRadius
-        color: root.subtle
+        radius: Style.space(12)
+        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.035)
+        border.width: 1
+        border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.09)
         clip: true
 
-        Text {
+        Column {
           anchors.centerIn: parent
           visible: mesh.messages.length === 0
-          text: mesh.topicJoined ? "No messages yet" : "Waiting for a mesh peer…"
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
+          spacing: Style.space(8)
+
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "󰍦"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.display
+            opacity: 0.65
+          }
+
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: mesh.topicJoined ? "No messages yet" : "Waiting for a mesh peer…"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+          }
         }
 
         ListView {
           id: messageList
           anchors.fill: parent
-          anchors.margins: Style.space(10)
-          spacing: Style.space(8)
+          anchors.margins: Style.space(16)
+          spacing: Style.space(12)
           clip: true
           model: mesh.messages
+          boundsBehavior: Flickable.StopAtBounds
           ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
           delegate: Item {
@@ -329,6 +346,10 @@ Panel {
             required property var modelData
             required property int index
             property bool copied: false
+            readonly property real measuredBodyWidth: bodyMetrics.tightBoundingRect.width
+            readonly property real preferredBubbleWidth: Math.min(
+              width * 0.72,
+              Math.max(Style.space(190), measuredBodyWidth + Style.space(48)))
             width: messageList.width
             height: bubble.implicitHeight
 
@@ -336,6 +357,13 @@ Panel {
               Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(String(modelData.body || "")) + " | wl-copy"])
               copied = true
               copiedTimer.restart()
+            }
+
+            TextMetrics {
+              id: bodyMetrics
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              text: String(modelData.body || "")
             }
 
             Timer {
@@ -347,26 +375,39 @@ Panel {
 
             Rectangle {
               id: bubble
-              // Keep chat bubbles wide enough for peer IDs, timestamps, and
-              // normal message lines. Deriving this from bubbleContent's
-              // implicit width was circular because that content is anchored
-              // to the bubble, collapsing every message to the 120px minimum.
-              width: parent.width * 0.86
-              implicitHeight: bubbleContent.implicitHeight + Style.space(16)
+              width: messageDelegate.preferredBubbleWidth
+              implicitHeight: bubbleContent.implicitHeight + Style.space(24)
               anchors.right: modelData.outgoing ? parent.right : undefined
               anchors.left: modelData.outgoing ? undefined : parent.left
-              radius: Style.cornerRadius
-              color: modelData.outgoing ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+              radius: Style.space(12)
+              color: modelData.outgoing
+                ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.13)
+                : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.055)
+              border.width: 1
+              border.color: modelData.outgoing
+                ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.28)
+                : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
 
               Column {
                 id: bubbleContent
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.margins: Style.space(11)
-                spacing: Style.space(3)
+                anchors.top: parent.top
+                anchors.margins: Style.space(12)
+                spacing: Style.space(5)
 
                 RowLayout {
                   width: parent.width
+                  spacing: Style.space(7)
+
+                  Rectangle {
+                    implicitWidth: Style.space(7)
+                    implicitHeight: implicitWidth
+                    radius: implicitWidth / 2
+                    color: modelData.outgoing ? root.accent : root.dim
+                    Layout.alignment: Qt.AlignVCenter
+                  }
+
                   Text {
                     Layout.fillWidth: true
                     text: modelData.outgoing ? "YOU" : mesh.shortPeer(modelData.from)
@@ -374,7 +415,9 @@ Panel {
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
                     font.bold: true
+                    elide: Text.ElideMiddle
                   }
+
                   Text {
                     text: Qt.formatTime(new Date(modelData.timestampMs), "HH:mm")
                     color: root.dim
@@ -384,29 +427,56 @@ Panel {
                 }
 
                 Text {
+                  id: messageBody
                   width: parent.width
+                  rightPadding: Style.space(34)
+                  topPadding: Style.space(7)
+                  bottomPadding: Style.space(8)
                   text: modelData.body
                   color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
                   wrapMode: Text.WrapAnywhere
-                  topPadding: Style.space(8)
-                  bottomPadding: Style.space(4)
+                  renderType: Text.NativeRendering
+                }
+              }
+
+              Rectangle {
+                id: copyButton
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.margins: Style.space(9)
+                width: Style.space(26)
+                height: width
+                radius: width / 2
+                color: copyMouse.containsMouse
+                  ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+                  : "transparent"
+                border.width: 1
+                border.color: messageDelegate.copied
+                  ? root.accent
+                  : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+
+                Text {
+                  anchors.centerIn: parent
+                  text: messageDelegate.copied ? "✓" : "󰆏"
+                  color: messageDelegate.copied ? root.accent : root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
                 }
 
-                Item {
-                  width: parent.width
-                  implicitHeight: copyButton.implicitHeight
+                MouseArea {
+                  id: copyMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: messageDelegate.copyMessage()
+                }
 
-                  PanelActionButton {
-                    id: copyButton
-                    anchors.right: parent.right
-                    iconText: messageDelegate.copied ? "✓" : "󰆏"
-                    tooltipText: messageDelegate.copied ? "Copied" : "Copy message"
-                    foreground: messageDelegate.copied ? root.accent : root.foreground
-                    fontFamily: root.fontFamily
-                    onClicked: messageDelegate.copyMessage()
-                  }
+                PanelToolTip {
+                  visible: copyMouse.containsMouse
+                  text: messageDelegate.copied ? "Copied" : "Copy message"
+                  fontFamily: root.fontFamily
                 }
               }
             }

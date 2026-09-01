@@ -111,7 +111,7 @@ Panel {
   }
 
   Shortcut {
-    sequence: "Ctrl+S"
+    sequence: "Tab"
     context: Qt.ApplicationShortcut
     enabled: root.opened
     onActivated: {
@@ -487,7 +487,7 @@ Panel {
         Layout.fillWidth: true
         Text {
           Layout.fillWidth: true
-          text: "ESC  CLOSE · CTRL+S  SETTINGS · ENTER  SEND"
+          text: "ESC  CLOSE · TAB  SETTINGS · ENTER  SEND"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -633,7 +633,7 @@ Panel {
 
           Text {
             Layout.fillWidth: true
-            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "ESC  BACK · CTRL+S  CHAT · C  COPY INVITE"
+            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "ESC  BACK · TAB  CHAT · C  COPY INVITE"
             color: mesh.inviteCopyError !== "" ? root.urgent : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

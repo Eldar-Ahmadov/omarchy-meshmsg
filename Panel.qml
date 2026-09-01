@@ -17,7 +17,17 @@ Panel {
   property bool revealInvite: false
   property bool replaceExisting: false
   property bool settingsOpen: false
+  property bool searchOpen: false
+  property string searchQuery: ""
+  property bool clipboardOpen: false
+  property string clipboardQuery: ""
+  property var clipboardHistory: []
+  property int clipboardIndex: 0
+  property bool messageCursorActive: false
   property int previousMessageCount: 0
+  readonly property var displayedMessages: filterMessages(mesh.messages, searchQuery)
+  readonly property var displayedClipboard: filterClipboard(clipboardHistory, clipboardQuery)
+  readonly property string clipboardHistoryPath: Quickshell.env("HOME") + "/.local/state/omarchy/clipboard-history.json"
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -50,12 +60,116 @@ Panel {
   }
 
   function scrollToBottom() {
-    if (messageList.count > 0) messageList.positionViewAtEnd()
+    if (messageList.count > 0) {
+      messageList.currentIndex = messageList.count - 1
+      messageList.positionViewAtEnd()
+    }
+  }
+
+  function filterMessages(values, query) {
+    var needle = String(query || "").trim().toLowerCase()
+    if (needle === "") return values
+    var result = []
+    for (var i = 0; i < values.length; i++) {
+      var message = values[i] || {}
+      var haystack = String(message.body || "") + " " + String(message.from || "")
+      if (haystack.toLowerCase().indexOf(needle) !== -1) result.push(message)
+    }
+    return result
+  }
+
+  function moveMessageCursor(delta) {
+    if (messageList.count === 0) return
+    messageCursorActive = true
+    var next = messageList.currentIndex
+    if (next < 0) next = delta > 0 ? 0 : messageList.count - 1
+    else next = Math.max(0, Math.min(messageList.count - 1, next + delta))
+    messageList.currentIndex = next
+    messageList.positionViewAtIndex(next, ListView.Contain)
+  }
+
+  function openSearch() {
+    searchOpen = true
+    messageCursorActive = false
+    Qt.callLater(function() { searchField.forceActiveFocus() })
+  }
+
+  function closeSearch() {
+    searchOpen = false
+    searchQuery = ""
+    if (mesh.running) Qt.callLater(function() { messageField.forceActiveFocus() })
+  }
+
+  function parseClipboardHistory(raw) {
+    var rows = []
+    try {
+      var values = JSON.parse(String(raw || "[]"))
+      if (!Array.isArray(values)) values = []
+      for (var i = 0; i < values.length && rows.length < 100; i++) {
+        var entry = values[i] || {}
+        if (String(entry.type || "") !== "text") continue
+        var text = String(entry.text || "")
+        if (text.trim() === "") continue
+        rows.push({
+          fullText: text,
+          previewText: text.replace(/\s+/g, " ").trim()
+        })
+      }
+    } catch (error) {
+      rows = []
+    }
+    clipboardHistory = rows
+    if (clipboardIndex >= displayedClipboard.length)
+      clipboardIndex = Math.max(0, displayedClipboard.length - 1)
+  }
+
+  function filterClipboard(values, query) {
+    var needle = String(query || "").trim().toLowerCase()
+    if (needle === "") return values
+    var result = []
+    for (var i = 0; i < values.length; i++) {
+      var entry = values[i] || {}
+      if (String(entry.fullText || "").toLowerCase().indexOf(needle) !== -1) result.push(entry)
+    }
+    return result
+  }
+
+  function moveClipboardCursor(delta) {
+    if (clipboardList.count === 0) return
+    clipboardIndex = Math.max(0, Math.min(clipboardList.count - 1, clipboardIndex + delta))
+    clipboardList.positionViewAtIndex(clipboardIndex, ListView.Contain)
+  }
+
+  function broadcastClipboardSelection() {
+    if (!mesh.running || clipboardIndex < 0 || clipboardIndex >= displayedClipboard.length) return
+    var entry = displayedClipboard[clipboardIndex]
+    if (entry && mesh.sendMessage(entry.fullText)) setClipboardSurface(false)
+  }
+
+  function setClipboardSurface(open) {
+    clipboardOpen = open
+    if (open) {
+      settingsOpen = false
+      searchOpen = false
+      searchQuery = ""
+      clipboardQuery = ""
+      clipboardIndex = 0
+      chatFocusTimer.stop()
+      messageField.focus = false
+      inviteField.focus = false
+      Qt.callLater(function() { clipboardSearchField.forceActiveFocus() })
+    } else {
+      clipboardSearchField.focus = false
+      if (mesh.running) chatFocusTimer.restart()
+    }
   }
 
   function setSettingsSurface(open) {
     settingsOpen = open
     if (open) {
+      clipboardOpen = false
+      searchOpen = false
+      searchQuery = ""
       chatFocusTimer.stop()
       messageField.focus = false
       inviteField.focus = false
@@ -69,6 +183,9 @@ Panel {
 
   onOpenedChanged: if (opened) {
     settingsOpen = false
+    clipboardOpen = false
+    searchOpen = false
+    searchQuery = ""
     unread = 0
     previousMessageCount = mesh.messages.length
     mesh.refresh()
@@ -81,6 +198,16 @@ Panel {
   Service {
     id: mesh
     settings: root.settings
+  }
+
+  FileView {
+    id: clipboardHistoryFile
+    path: root.clipboardHistoryPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.parseClipboardHistory(text())
+    onLoadFailed: root.parseClipboardHistory("[]")
+    onFileChanged: reload()
   }
 
   Connections {
@@ -108,6 +235,7 @@ Panel {
     function start(): string { mesh.startDaemon(); return "ok" }
     function stop(): string { mesh.stopDaemon(); return "ok" }
     function settings(): string { root.open(); root.setSettingsSurface(true); return "ok" }
+    function clipboard(): string { root.open(); root.setClipboardSurface(true); return "ok" }
     function copyInvite(): string { return mesh.copyInvite() ? "ok" : "unavailable" }
     function status(): string {
       return JSON.stringify({ running: mesh.running, connected: mesh.topicJoined, neighbors: mesh.neighbors, peer: mesh.peer })
@@ -119,13 +247,64 @@ Panel {
     context: Qt.ApplicationShortcut
     enabled: root.opened
     onActivated: {
-      if (root.settingsOpen) root.setSettingsSurface(false)
+      if (root.clipboardOpen) root.setClipboardSurface(false)
+      else if (root.searchOpen) root.closeSearch()
+      else if (root.settingsOpen) root.setSettingsSurface(false)
       else root.close()
     }
   }
 
   Shortcut {
+    sequence: "Up"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && !root.settingsOpen && !root.clipboardOpen && messageList.count > 0
+    onActivated: root.moveMessageCursor(-1)
+  }
+
+  Shortcut {
+    sequence: "Down"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && !root.settingsOpen && !root.clipboardOpen && messageList.count > 0
+    onActivated: root.moveMessageCursor(1)
+  }
+
+  Shortcut {
+    sequence: "Ctrl+F"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && !root.settingsOpen && !root.clipboardOpen && !root.searchOpen
+    onActivated: root.openSearch()
+  }
+
+  Shortcut {
+    sequence: "Up"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && root.clipboardOpen && clipboardList.count > 0
+    onActivated: root.moveClipboardCursor(-1)
+  }
+
+  Shortcut {
+    sequence: "Down"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && root.clipboardOpen && clipboardList.count > 0
+    onActivated: root.moveClipboardCursor(1)
+  }
+
+  Shortcut {
+    sequence: "Return"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && root.clipboardOpen && clipboardList.count > 0 && !mesh.sending
+    onActivated: root.broadcastClipboardSelection()
+  }
+
+  Shortcut {
     sequence: "Tab"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened
+    onActivated: root.setClipboardSurface(!root.clipboardOpen)
+  }
+
+  Shortcut {
+    sequence: "Ctrl+S"
     context: Qt.ApplicationShortcut
     enabled: root.opened
     onActivated: root.setSettingsSurface(!root.settingsOpen)
@@ -135,7 +314,7 @@ Panel {
     id: chatFocusTimer
     interval: 240
     repeat: false
-    onTriggered: if (root.opened && !root.settingsOpen && mesh.running) messageField.forceActiveFocus()
+    onTriggered: if (root.opened && !root.settingsOpen && !root.clipboardOpen && mesh.running) messageField.forceActiveFocus()
   }
 
   Shortcut {
@@ -196,7 +375,7 @@ Panel {
       y: Style.space(14)
       width: parent.width - Style.space(28)
       spacing: Style.space(12)
-      visible: !root.settingsOpen || chatRotation.angle > -89.9
+      visible: (!root.settingsOpen && !root.clipboardOpen) || chatRotation.angle > -89.9
       opacity: 1.0 - Math.abs(chatRotation.angle) / 90.0
 
       transform: Rotation {
@@ -204,7 +383,7 @@ Panel {
         origin.x: content.width / 2
         origin.y: content.height / 2
         axis { x: 0; y: 1; z: 0 }
-        angle: root.settingsOpen ? -90 : 0
+        angle: root.settingsOpen || root.clipboardOpen ? -90 : 0
         Behavior on angle {
           NumberAnimation { duration: 220; easing.type: Easing.InOutQuad }
         }
@@ -241,6 +420,15 @@ Panel {
               font.bold: true
             }
           }
+        }
+
+        PanelActionButton {
+          visible: mesh.installed && mesh.running
+          iconText: "󰅌"
+          tooltipText: "Broadcast clipboard"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: root.setClipboardSurface(true)
         }
 
         PanelActionButton {
@@ -298,19 +486,80 @@ Panel {
         }
       }
 
-      Rectangle {
+      PanelSeparator {
+        visible: mesh.installed && mesh.running
+        Layout.fillWidth: true
+        foreground: root.foreground
+      }
+
+      Item {
         visible: mesh.installed && mesh.running
         Layout.fillWidth: true
         Layout.preferredHeight: Style.space(360)
-        radius: Style.space(12)
-        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.035)
-        border.width: 1
-        border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.09)
         clip: true
+
+        Rectangle {
+          id: searchBar
+          anchors.top: parent.top
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.margins: Style.space(8)
+          height: Style.space(44)
+          z: 3
+          visible: root.searchOpen
+          radius: Style.space(10)
+          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06)
+          border.width: 1
+          border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+
+          RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: Style.space(12)
+            anchors.rightMargin: Style.space(8)
+            spacing: Style.space(8)
+
+            Text {
+              text: "󰍉"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.icon
+            }
+
+            TextField {
+              id: searchField
+              Layout.fillWidth: true
+              placeholderText: "Search messages or peer ID"
+              text: root.searchQuery
+              font.family: root.fontFamily
+              background: Item {}
+              onTextChanged: {
+                root.searchQuery = text
+                root.messageCursorActive = false
+                messageList.currentIndex = messageList.count > 0 ? 0 : -1
+                if (messageList.count > 0) messageList.positionViewAtIndex(0, ListView.Beginning)
+              }
+            }
+
+            Text {
+              text: messageList.count + " result" + (messageList.count === 1 ? "" : "s")
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            PanelActionButton {
+              iconText: "󰅖"
+              tooltipText: "Close search"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              onClicked: root.closeSearch()
+            }
+          }
+        }
 
         Column {
           anchors.centerIn: parent
-          visible: mesh.messages.length === 0
+          visible: root.displayedMessages.length === 0
           spacing: Style.space(8)
 
           Text {
@@ -324,7 +573,8 @@ Panel {
 
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: mesh.topicJoined ? "No messages yet" : "Waiting for a mesh peer…"
+            text: root.searchQuery !== "" ? "No matching messages"
+              : mesh.topicJoined ? "No messages yet" : "Waiting for a mesh peer…"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -334,10 +584,13 @@ Panel {
         ListView {
           id: messageList
           anchors.fill: parent
-          anchors.margins: Style.space(16)
-          spacing: Style.space(12)
+          anchors.leftMargin: 0
+          anchors.rightMargin: 0
+          anchors.bottomMargin: Style.space(8)
+          anchors.topMargin: root.searchOpen ? Style.space(54) : Style.space(8)
+          spacing: Style.space(8)
           clip: true
-          model: mesh.messages
+          model: root.displayedMessages
           boundsBehavior: Flickable.StopAtBounds
           ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
@@ -346,10 +599,6 @@ Panel {
             required property var modelData
             required property int index
             property bool copied: false
-            readonly property real measuredBodyWidth: bodyMetrics.tightBoundingRect.width
-            readonly property real preferredBubbleWidth: Math.min(
-              width * 0.72,
-              Math.max(Style.space(190), measuredBodyWidth + Style.space(48)))
             width: messageList.width
             height: bubble.implicitHeight
 
@@ -357,13 +606,6 @@ Panel {
               Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(String(modelData.body || "")) + " | wl-copy"])
               copied = true
               copiedTimer.restart()
-            }
-
-            TextMetrics {
-              id: bodyMetrics
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              text: String(modelData.body || "")
             }
 
             Timer {
@@ -375,36 +617,64 @@ Panel {
 
             Rectangle {
               id: bubble
-              width: messageDelegate.preferredBubbleWidth
-              implicitHeight: bubbleContent.implicitHeight + Style.space(24)
-              anchors.right: modelData.outgoing ? parent.right : undefined
-              anchors.left: modelData.outgoing ? undefined : parent.left
-              radius: Style.space(12)
-              color: modelData.outgoing
-                ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.13)
-                : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.055)
-              border.width: 1
-              border.color: modelData.outgoing
-                ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.28)
-                : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
+              anchors.left: parent.left
+              anchors.right: parent.right
+              implicitHeight: bubbleContent.implicitHeight + Style.space(16)
+              radius: 0
+              color: root.messageCursorActive && messageList.currentIndex === index
+                ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.20)
+                : modelData.outgoing
+                  ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.09)
+                  : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.055)
+
+              Rectangle {
+                visible: root.messageCursorActive && messageList.currentIndex === index
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: Style.space(3)
+                color: root.accent
+              }
+
+              MouseArea {
+                id: rowMouse
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                hoverEnabled: true
+                onClicked: {
+                  root.messageCursorActive = true
+                  messageList.currentIndex = index
+                }
+              }
 
               Column {
                 id: bubbleContent
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.margins: Style.space(12)
-                spacing: Style.space(5)
+                anchors.margins: Style.space(8)
+                anchors.leftMargin: Style.space(12)
+                anchors.rightMargin: Style.space(10)
+                spacing: Style.space(2)
 
                 RowLayout {
                   width: parent.width
                   spacing: Style.space(7)
 
+                  Text {
+                    visible: modelData.outgoing
+                    text: Qt.formatTime(new Date(modelData.timestampMs), "HH:mm")
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+
                   Rectangle {
+                    visible: !modelData.outgoing
                     implicitWidth: Style.space(7)
                     implicitHeight: implicitWidth
                     radius: implicitWidth / 2
-                    color: modelData.outgoing ? root.accent : root.dim
+                    color: root.dim
                     Layout.alignment: Qt.AlignVCenter
                   }
 
@@ -416,9 +686,20 @@ Panel {
                     font.pixelSize: Style.font.caption
                     font.bold: true
                     elide: Text.ElideMiddle
+                    horizontalAlignment: modelData.outgoing ? Text.AlignRight : Text.AlignLeft
+                  }
+
+                  Rectangle {
+                    visible: modelData.outgoing
+                    implicitWidth: Style.space(7)
+                    implicitHeight: implicitWidth
+                    radius: implicitWidth / 2
+                    color: root.accent
+                    Layout.alignment: Qt.AlignVCenter
                   }
 
                   Text {
+                    visible: !modelData.outgoing
                     text: Qt.formatTime(new Date(modelData.timestampMs), "HH:mm")
                     color: root.dim
                     font.family: root.fontFamily
@@ -429,9 +710,9 @@ Panel {
                 Text {
                   id: messageBody
                   width: parent.width
-                  rightPadding: Style.space(34)
-                  topPadding: Style.space(7)
-                  bottomPadding: Style.space(8)
+                  rightPadding: Style.space(30)
+                  topPadding: Style.space(3)
+                  bottomPadding: Style.space(2)
                   text: modelData.body
                   color: root.foreground
                   font.family: root.fontFamily
@@ -445,10 +726,12 @@ Panel {
                 id: copyButton
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                anchors.margins: Style.space(9)
-                width: Style.space(26)
+                anchors.margins: Style.space(7)
+                width: Style.space(22)
                 height: width
-                radius: width / 2
+                radius: Style.space(3)
+                opacity: rowMouse.containsMouse || messageDelegate.copied ? 1 : 0
+                enabled: opacity > 0
                 color: copyMouse.containsMouse
                   ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
                   : "transparent"
@@ -456,6 +739,10 @@ Panel {
                 border.color: messageDelegate.copied
                   ? root.accent
                   : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+
+                Behavior on opacity {
+                  NumberAnimation { duration: 120 }
+                }
 
                 Text {
                   anchors.centerIn: parent
@@ -482,6 +769,12 @@ Panel {
             }
           }
         }
+      }
+
+      PanelSeparator {
+        visible: mesh.installed && mesh.running
+        Layout.fillWidth: true
+        foreground: root.foreground
       }
 
       RowLayout {
@@ -571,7 +864,7 @@ Panel {
         Layout.fillWidth: true
         Text {
           Layout.fillWidth: true
-          text: "ESC  CLOSE · TAB  SETTINGS · ENTER  SEND"
+          text: "esc  close · tab  clipboard · ctrl+s  settings · ↑↓  messages · ctrl+f  search · enter  send"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -717,7 +1010,7 @@ Panel {
 
           Text {
             Layout.fillWidth: true
-            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "ESC  BACK · TAB  CHAT · C  COPY INVITE"
+            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "esc  back · ctrl+s  chat · tab  clipboard · c  copy invite"
             color: mesh.inviteCopyError !== "" ? root.urgent : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -731,6 +1024,241 @@ Panel {
             fontFamily: root.fontFamily
             enabled: mesh.hasInvite && !mesh.copyingInvite
             onClicked: mesh.copyInvite()
+          }
+        }
+      }
+    }
+
+    Rectangle {
+      id: clipboardSurface
+      anchors.fill: parent
+      z: 20
+      visible: root.clipboardOpen || clipboardRotation.angle < 89.9
+      opacity: 1.0 - clipboardRotation.angle / 90.0
+      color: Color.background
+      radius: Style.cornerRadius
+      border.width: 1
+      border.color: root.subtle
+
+      transform: Rotation {
+        id: clipboardRotation
+        origin.x: clipboardSurface.width / 2
+        origin.y: clipboardSurface.height / 2
+        axis { x: 0; y: 1; z: 0 }
+        angle: root.clipboardOpen ? 0 : 90
+        Behavior on angle {
+          NumberAnimation { duration: 220; easing.type: Easing.InOutQuad }
+        }
+      }
+
+      ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: Style.space(16)
+        spacing: Style.space(10)
+
+        RowLayout {
+          Layout.fillWidth: true
+          spacing: Style.space(10)
+
+          PanelActionButton {
+            iconText: "󰁍"
+            tooltipText: "Back to chat"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.setClipboardSurface(false)
+          }
+
+          ColumnLayout {
+            Layout.fillWidth: true
+            spacing: Style.space(1)
+            Text {
+              Layout.fillWidth: true
+              text: "BROADCAST CLIPBOARD"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.heading
+              font.bold: true
+            }
+            Text {
+              text: "Choose a text entry to send to every connected peer"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
+
+        Rectangle {
+          Layout.fillWidth: true
+          implicitHeight: Style.space(44)
+          radius: Style.space(8)
+          color: root.subtle
+          border.width: 1
+          border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
+
+          RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: Style.space(12)
+            anchors.rightMargin: Style.space(12)
+            spacing: Style.space(9)
+
+            Text {
+              text: "󰍉"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.icon
+            }
+
+            TextField {
+              id: clipboardSearchField
+              Layout.fillWidth: true
+              placeholderText: "Search clipboard history"
+              text: root.clipboardQuery
+              font.family: root.fontFamily
+              background: Item {}
+              onTextChanged: {
+                root.clipboardQuery = text
+                root.clipboardIndex = 0
+                if (clipboardList.count > 0) clipboardList.positionViewAtIndex(0, ListView.Beginning)
+              }
+            }
+
+            Text {
+              text: clipboardList.count + " item" + (clipboardList.count === 1 ? "" : "s")
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
+
+        RowLayout {
+          Layout.fillWidth: true
+          Layout.fillHeight: true
+          spacing: 0
+
+          Rectangle {
+            Layout.preferredWidth: parent.width * 0.46
+            Layout.fillHeight: true
+            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.025)
+
+            ListView {
+              id: clipboardList
+              anchors.fill: parent
+              model: root.displayedClipboard
+              clip: true
+              spacing: Style.space(3)
+              boundsBehavior: Flickable.StopAtBounds
+              currentIndex: root.clipboardIndex
+              ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+              delegate: Rectangle {
+                id: clipboardRow
+                required property int index
+                required property var modelData
+                width: clipboardList.width
+                height: Style.space(48)
+                color: index === root.clipboardIndex
+                  ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.20)
+                  : "transparent"
+
+                Text {
+                  anchors.fill: parent
+                  anchors.leftMargin: Style.space(12)
+                  anchors.rightMargin: Style.space(12)
+                  text: modelData.previewText
+                  color: index === root.clipboardIndex ? root.foreground : root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  elide: Text.ElideRight
+                  verticalAlignment: Text.AlignVCenter
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onEntered: root.clipboardIndex = clipboardRow.index
+                  onClicked: root.clipboardIndex = clipboardRow.index
+                  onDoubleClicked: root.broadcastClipboardSelection()
+                }
+              }
+            }
+
+            Column {
+              anchors.centerIn: parent
+              visible: clipboardList.count === 0
+              spacing: Style.space(8)
+              Text {
+                width: parent.width
+                text: "󰅌"
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.display
+                horizontalAlignment: Text.AlignHCenter
+              }
+              Text {
+                width: parent.width
+                text: root.clipboardHistory.length === 0 ? "Clipboard is empty" : "No matches"
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                horizontalAlignment: Text.AlignHCenter
+              }
+            }
+          }
+
+          Rectangle {
+            Layout.preferredWidth: 1
+            Layout.fillHeight: true
+            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+          }
+
+          Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            color: "transparent"
+
+            Flickable {
+              anchors.fill: parent
+              anchors.margins: Style.space(14)
+              contentWidth: width
+              contentHeight: clipboardPreview.implicitHeight
+              clip: true
+              boundsBehavior: Flickable.StopAtBounds
+              ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+              Text {
+                id: clipboardPreview
+                width: parent.width
+                text: root.displayedClipboard.length > 0 && root.clipboardIndex < root.displayedClipboard.length
+                  ? root.displayedClipboard[root.clipboardIndex].fullText : ""
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                wrapMode: Text.WrapAnywhere
+                renderType: Text.NativeRendering
+              }
+            }
+          }
+        }
+
+        RowLayout {
+          Layout.fillWidth: true
+          spacing: Style.space(10)
+
+          Text {
+            Layout.fillWidth: true
+            text: "esc  back · tab  chat · ctrl+s  settings · ↑↓  select · enter  broadcast"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Button {
+            text: mesh.sending ? "Broadcasting…" : "Broadcast"
+            enabled: clipboardList.count > 0 && !mesh.sending
+            onClicked: root.broadcastClipboardSelection()
           }
         }
       }

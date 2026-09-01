@@ -12,9 +12,14 @@ Item {
   property bool endpointOnline: false
   property bool topicJoined: false
   property int neighbors: 0
+  property bool advertisesSelf: false
+  property bool hasInvite: false
+  property int bootstrapPeerCount: 0
+  property bool selfAdvertised: false
   property string peer: ""
-  property string role: ""
   property string topic: ""
+  property string localEndpoint: ""
+  property double statusUpdatedAt: 0
   property string statusText: "Checking…"
   property string lastError: ""
   property string actionStatus: ""
@@ -81,9 +86,14 @@ Item {
       endpointOnline = value.endpoint_online === true
       topicJoined = value.topic_joined === true
       neighbors = Number(value.neighbors || 0)
+      advertisesSelf = value.advertises_self === true
+      hasInvite = value.has_invite === true
+      bootstrapPeerCount = Number(value.bootstrap_peer_count || 0)
+      selfAdvertised = value.self_advertised === true
       peer = String(value.peer || "")
-      role = String(value.role || "")
       topic = String(value.topic || "")
+      localEndpoint = String(value.local_endpoint || value.socket || "")
+      statusUpdatedAt = Date.now()
       statusText = !endpointOnline ? "Connecting…" : (!topicJoined ? "Waiting for peers" : "Connected")
       lastError = ""
       starting = false

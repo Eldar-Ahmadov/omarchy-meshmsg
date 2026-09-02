@@ -11,6 +11,7 @@ An Omarchy bar widget and chat panel backed by the local [`meshmsg`](https://git
 - unread counter in the bar
 - daemon start/stop controls
 - join an existing chat using an invite capability
+- copy the stored invite or display it as a scannable QR code
 - bounded in-memory message history (not persisted by the plugin)
 
 The plugin uses the current top-level meshmsg commands (`daemon`, `join`, `listen`, `status`, `send`, and `stop`). It is compatible with meshmsg's equal-peer model introduced in v0.1.4; there is no seed/member service distinction.

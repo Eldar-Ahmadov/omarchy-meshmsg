@@ -25,6 +25,11 @@ Panel {
   property int clipboardIndex: 0
   property bool messageCursorActive: false
   property string copiedStatusKey: ""
+  property bool inviteQrOpen: false
+  property bool inviteQrLoading: false
+  property string inviteQrError: ""
+  property var inviteQrRows: []
+  property int inviteQrSize: 0
   property int previousMessageCount: 0
   readonly property var displayedMessages: filterMessages(mesh.messages, searchQuery)
   readonly property var displayedClipboard: filterClipboard(clipboardHistory, clipboardQuery)
@@ -150,6 +155,7 @@ Panel {
   function setClipboardSurface(open) {
     clipboardOpen = open
     if (open) {
+      if (inviteQrOpen) closeInviteQr()
       settingsOpen = false
       searchOpen = false
       searchQuery = ""
@@ -179,6 +185,50 @@ Panel {
     Quickshell.execDetached(["uwsm-app", "--", "xdg-terminal-exec", "--dir=" + path])
   }
 
+  function parseInviteQr(raw) {
+    var lines = String(raw || "").trim().split(/\r?\n/).filter(function(line) { return line !== "" })
+    if (lines.length === 0) {
+      inviteQrError = "Could not generate invite QR code"
+      return
+    }
+    var size = lines[0].length
+    if (size !== lines.length) {
+      inviteQrError = "Invalid invite QR matrix"
+      return
+    }
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].length !== size || !/^[01]+$/.test(lines[i])) {
+        inviteQrError = "Invalid invite QR matrix"
+        return
+      }
+    }
+    inviteQrRows = lines
+    inviteQrSize = size
+    inviteQrError = ""
+  }
+
+  function showInviteQr() {
+    if (!mesh.hasInvite || inviteQrProcess.running) return
+    inviteQrSize = 0
+    inviteQrRows = []
+    inviteQrError = ""
+    inviteQrLoading = true
+    inviteQrOpen = true
+    inviteQrProcess.command = [Quickshell.env("HOME") + "/.config/omarchy/plugins/eldar.meshmsg/invite-qr.sh", mesh.binaryPath]
+    inviteQrProcess.running = true
+    Qt.callLater(function() { inviteQrSurface.forceActiveFocus() })
+  }
+
+  function closeInviteQr() {
+    inviteQrOpen = false
+    inviteQrLoading = false
+    inviteQrSize = 0
+    inviteQrRows = []
+    inviteQrError = ""
+    if (inviteQrProcess.running) inviteQrProcess.running = false
+    Qt.callLater(function() { statusSurface.forceActiveFocus() })
+  }
+
   function setSettingsSurface(open) {
     settingsOpen = open
     if (open) {
@@ -191,6 +241,7 @@ Panel {
       mesh.refresh()
       Qt.callLater(function() { statusSurface.forceActiveFocus() })
     } else {
+      if (inviteQrOpen) closeInviteQr()
       statusSurface.focus = false
       if (mesh.running) chatFocusTimer.restart()
     }
@@ -213,6 +264,25 @@ Panel {
   Service {
     id: mesh
     settings: root.settings
+  }
+
+  Process {
+    id: inviteQrProcess
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.parseInviteQr(text)
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var message = String(text || "").replace(/^error:\s*/i, "").trim()
+        if (message !== "") root.inviteQrError = message
+      }
+    }
+    onExited: function(exitCode) {
+      root.inviteQrLoading = false
+      if (exitCode !== 0 && root.inviteQrError === "") root.inviteQrError = "Could not generate invite QR code"
+    }
   }
 
   FileView {
@@ -252,6 +322,7 @@ Panel {
     function settings(): string { root.open(); root.setSettingsSurface(true); return "ok" }
     function clipboard(): string { root.open(); root.setClipboardSurface(true); return "ok" }
     function copyInvite(): string { return mesh.copyInvite() ? "ok" : "unavailable" }
+    function inviteQr(): string { root.open(); root.setSettingsSurface(true); root.showInviteQr(); return "ok" }
     function status(): string {
       return JSON.stringify({ running: mesh.running, connected: mesh.topicJoined, neighbors: mesh.neighbors, peer: mesh.peer })
     }
@@ -262,7 +333,8 @@ Panel {
     context: Qt.ApplicationShortcut
     enabled: root.opened
     onActivated: {
-      if (root.clipboardOpen) root.setClipboardSurface(false)
+      if (root.inviteQrOpen) root.closeInviteQr()
+      else if (root.clipboardOpen) root.setClipboardSurface(false)
       else if (root.searchOpen) root.closeSearch()
       else if (root.settingsOpen) root.setSettingsSurface(false)
       else root.close()
@@ -1003,12 +1075,125 @@ Panel {
           }
 
           PanelActionButton {
+            iconText: "󰐲"
+            tooltipText: mesh.hasInvite ? "Show invite QR code" : "Invite unavailable"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            enabled: mesh.hasInvite && !root.inviteQrLoading
+            onClicked: root.showInviteQr()
+          }
+
+          PanelActionButton {
             iconText: mesh.inviteCopied ? "✓" : "󰆏"
             tooltipText: mesh.inviteCopied ? "Invite copied" : (mesh.hasInvite ? "Copy invite" : "Invite unavailable")
             foreground: mesh.inviteCopied ? root.accent : root.foreground
             fontFamily: root.fontFamily
             enabled: mesh.hasInvite && !mesh.copyingInvite
             onClicked: mesh.copyInvite()
+          }
+        }
+      }
+
+      Rectangle {
+        id: inviteQrSurface
+        anchors.fill: parent
+        z: 30
+        visible: root.inviteQrOpen
+        focus: visible
+        color: Color.background
+
+        ColumnLayout {
+          anchors.fill: parent
+          anchors.margins: Style.space(16)
+          spacing: Style.space(10)
+
+          RowLayout {
+            Layout.fillWidth: true
+            spacing: Style.space(10)
+
+            PanelActionButton {
+              iconText: "󰁍"
+              tooltipText: "Back to status"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              onClicked: root.closeInviteQr()
+            }
+
+            Text {
+              Layout.fillWidth: true
+              text: "INVITE QR CODE"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.heading
+              font.bold: true
+            }
+          }
+
+          Item {
+            id: qrArea
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+
+            Text {
+              anchors.centerIn: parent
+              visible: root.inviteQrLoading
+              text: "Generating invite QR code…"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+            }
+
+            Text {
+              anchors.centerIn: parent
+              visible: !root.inviteQrLoading && root.inviteQrError !== ""
+              width: parent.width - Style.space(32)
+              text: root.inviteQrError
+              color: root.urgent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+              horizontalAlignment: Text.AlignHCenter
+            }
+
+            Rectangle {
+              id: inviteQrCanvas
+              readonly property int moduleSize: root.inviteQrSize > 0
+                ? Math.max(2, Math.floor(Math.min(qrArea.width - Style.space(32), qrArea.height - Style.space(32)) / root.inviteQrSize))
+                : 0
+              visible: root.inviteQrSize > 0 && !root.inviteQrLoading && root.inviteQrError === ""
+              width: root.inviteQrSize * moduleSize
+              height: width
+              anchors.centerIn: parent
+              color: "white"
+
+              Grid {
+                anchors.fill: parent
+                columns: root.inviteQrSize
+
+                Repeater {
+                  model: root.inviteQrSize * root.inviteQrSize
+
+                  Rectangle {
+                    required property int index
+                    readonly property int matrixRow: Math.floor(index / root.inviteQrSize)
+                    readonly property int matrixColumn: index % root.inviteQrSize
+                    readonly property string matrixText: matrixRow < root.inviteQrRows.length ? String(root.inviteQrRows[matrixRow] || "") : ""
+                    width: inviteQrCanvas.moduleSize
+                    height: width
+                    color: matrixText.charAt(matrixColumn) === "1" ? "#111111" : "transparent"
+                  }
+                }
+              }
+            }
+          }
+
+          Text {
+            Layout.fillWidth: true
+            text: "Anyone who scans this code can join the plaintext topic."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            horizontalAlignment: Text.AlignHCenter
           }
         }
       }

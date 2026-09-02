@@ -1080,7 +1080,7 @@ Panel {
         Rectangle {
           Layout.fillWidth: true
           implicitHeight: Style.space(44)
-          radius: Style.space(8)
+          radius: 0
           color: root.subtle
           border.width: 1
           border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)

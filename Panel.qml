@@ -709,11 +709,14 @@ Panel {
                 color: root.accent
               }
 
+              HoverHandler {
+                id: bubbleHover
+              }
+
               MouseArea {
                 id: rowMouse
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton
-                hoverEnabled: true
                 onClicked: {
                   root.messageCursorActive = true
                   messageList.currentIndex = index
@@ -803,7 +806,7 @@ Panel {
                 width: Style.space(22)
                 height: width
                 radius: Style.space(3)
-                opacity: rowMouse.containsMouse || messageDelegate.copied ? 1 : 0
+                opacity: bubbleHover.hovered || copyMouse.containsMouse || messageDelegate.copied ? 1 : 0
                 enabled: opacity > 0
                 color: copyMouse.containsMouse
                   ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)

@@ -373,24 +373,6 @@ Panel {
     contentWidth: panel.fittedContentWidth(Style.space(645))
     contentHeight: panel.fittedContentHeight(content.implicitHeight + Style.space(28), Style.space(620))
 
-    Rectangle {
-      id: chatSurfaceBorder
-      anchors.fill: parent
-      visible: content.visible
-      opacity: content.opacity
-      color: "transparent"
-      radius: Style.cornerRadius
-      border.width: 1
-      border.color: root.subtle
-
-      transform: Rotation {
-        origin.x: chatSurfaceBorder.width / 2
-        origin.y: chatSurfaceBorder.height / 2
-        axis { x: 0; y: 1; z: 0 }
-        angle: chatRotation.angle
-      }
-    }
-
     ColumnLayout {
       id: content
       x: Style.space(14)
@@ -905,8 +887,6 @@ Panel {
       opacity: 1.0 - settingsRotation.angle / 90.0
       color: Color.background
       radius: Style.cornerRadius
-      border.width: 1
-      border.color: root.subtle
 
       transform: Rotation {
         id: settingsRotation
@@ -1048,8 +1028,6 @@ Panel {
       opacity: 1.0 - clipboardRotation.angle / 90.0
       color: Color.background
       radius: Style.cornerRadius
-      border.width: 1
-      border.color: root.subtle
 
       transform: Rotation {
         id: clipboardRotation

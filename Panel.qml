@@ -414,8 +414,15 @@ Panel {
   Shortcut {
     sequence: "C"
     context: Qt.ApplicationShortcut
-    enabled: root.opened && root.settingsOpen && mesh.hasInvite && !mesh.copyingInvite
+    enabled: root.opened && root.settingsOpen && !root.inviteQrOpen && mesh.hasInvite && !mesh.copyingInvite
     onActivated: mesh.copyInvite()
+  }
+
+  Shortcut {
+    sequence: "Q"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && root.settingsOpen && !root.inviteQrOpen && mesh.hasInvite && !root.inviteQrLoading
+    onActivated: root.showInviteQr()
   }
 
   WidgetButton {
@@ -1067,7 +1074,7 @@ Panel {
 
           Text {
             Layout.fillWidth: true
-            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "esc  back · ctrl+s  chat · tab  clipboard · c  copy invite"
+            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "esc  back · ctrl+s  chat · tab  clipboard · c  copy invite · q  qr invite"
             color: mesh.inviteCopyError !== "" ? root.urgent : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

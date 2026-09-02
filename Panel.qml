@@ -927,12 +927,6 @@ Panel {
               font.pixelSize: Style.font.heading
               font.bold: true
             }
-            Text {
-              text: "Live information from meshmsg --json status"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
           }
 
           PanelActionButton {

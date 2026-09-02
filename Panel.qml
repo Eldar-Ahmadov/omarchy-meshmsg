@@ -876,7 +876,7 @@ Panel {
         Layout.fillWidth: true
         Text {
           Layout.fillWidth: true
-          text: "esc  close · tab  clipboard · ctrl+s  settings · ↑↓  messages · ctrl+f  search · enter  send"
+          text: "esc  close · tab  clipboard · ctrl+s  settings · ↑↓  messages · ctrl+f  search"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

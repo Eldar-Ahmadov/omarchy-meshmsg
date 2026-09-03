@@ -31,6 +31,9 @@ Panel {
   property var inviteQrRows: []
   property int inviteQrSize: 0
   property int previousMessageCount: 0
+  property int spinnerIndex: 0
+  readonly property var spinnerFrames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+  readonly property string spinnerFrame: spinnerFrames[spinnerIndex]
   readonly property var displayedMessages: filterMessages(mesh.messages, searchQuery)
   readonly property var displayedClipboard: filterClipboard(clipboardHistory, clipboardQuery)
   readonly property string clipboardHistoryPath: Quickshell.env("HOME") + "/.local/state/omarchy/clipboard-history.json"
@@ -411,6 +414,14 @@ Panel {
     onTriggered: root.copiedStatusKey = ""
   }
 
+  Timer {
+    interval: 80
+    repeat: true
+    running: mesh.starting
+    onTriggered: root.spinnerIndex = (root.spinnerIndex + 1) % root.spinnerFrames.length
+    onRunningChanged: if (!running) root.spinnerIndex = 0
+  }
+
   Shortcut {
     sequence: "C"
     context: Qt.ApplicationShortcut
@@ -525,7 +536,7 @@ Panel {
 
         Button {
           visible: mesh.installed
-          text: mesh.running ? "Stop" : "Start"
+          text: mesh.starting ? root.spinnerFrame + " Starting" : (mesh.running ? "Stop" : "Start")
           enabled: !mesh.busy
           onClicked: mesh.running ? mesh.stopDaemon() : mesh.startDaemon()
         }

@@ -8,6 +8,7 @@ Item {
   property var settings: ({})
   property bool installed: false
   property string binaryPath: ""
+  property string version: ""
   property bool running: false
   property bool endpointOnline: false
   property bool topicJoined: false
@@ -270,8 +271,25 @@ Item {
     onExited: function(exitCode) {
       root.binaryPath = exitCode === 0 ? whichProcess.output : ""
       root.installed = root.binaryPath !== ""
-      if (root.installed) root.refresh()
-      else root.setUnavailable("Not installed")
+      if (root.installed) {
+        versionProcess.command = [root.binaryPath, "--version"]
+        versionProcess.running = true
+        root.refresh()
+      } else {
+        root.version = ""
+        root.setUnavailable("Not installed")
+      }
+    }
+  }
+
+  Process {
+    id: versionProcess
+    property string output: ""
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: versionProcess.output = String(text || "").trim() }
+    onExited: function(exitCode) {
+      root.version = exitCode === 0
+        ? versionProcess.output.replace(/^meshmsg\s+/i, "")
+        : ""
     }
   }
 

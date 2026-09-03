@@ -1046,6 +1046,7 @@ Panel {
               width: parent.width
               spacing: Style.space(9)
 
+              StatusRow { label: "VERSION"; value: mesh.version || "—" }
               StatusRow { label: "DAEMON"; value: mesh.running ? "Running" : "Stopped"; valueColor: mesh.running ? root.connectionColor : root.dim }
               StatusRow { label: "ENDPOINT"; value: mesh.endpointOnline ? "Online" : "Offline"; valueColor: mesh.endpointOnline ? root.connectionColor : root.dim }
               StatusRow { label: "TOPIC"; value: mesh.topicJoined ? "Joined" : "Not joined"; valueColor: mesh.topicJoined ? root.connectionColor : root.dim }

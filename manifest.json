@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "eldar.meshmsg",
   "name": "Meshmsg Chat",
-  "version": "1.5.0",
+  "version": "1.6.1",
   "author": "Eldar",
   "license": "MIT",
-  "description": "Chat over the local meshmsg peer-to-peer daemon from the Omarchy bar.",
+  "description": "Chat and share attachments over the local meshmsg peer-to-peer daemon from the Omarchy bar.",
   "kinds": ["bar-widget"],
   "activation": "on-demand",
   "entryPoints": {
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "Meshmsg Chat",
-    "description": "Read and send meshmsg messages, manage the daemon, and join an existing chat.",
+    "description": "Read and send messages, share attachments, manage the daemon, and join an existing chat.",
     "category": "Network",
     "aliases": ["meshmsg", "chat", "mesh"],
     "allowMultiple": false,
@@ -35,7 +35,7 @@
       {
         "key": "maxMessages",
         "type": "integer",
-        "label": "Messages kept in memory",
+        "label": "Timeline items kept in memory",
         "min": 20,
         "max": 500,
         "step": 20,

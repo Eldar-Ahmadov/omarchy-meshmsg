@@ -30,8 +30,19 @@ Panel {
   property string inviteQrError: ""
   property var inviteQrRows: []
   property int inviteQrSize: 0
-  property int previousMessageCount: 0
   property int spinnerIndex: 0
+  property var attachmentDraft: null
+  property bool attachmentPickerBusy: false
+  property string pendingDownloadAttachmentId: ""
+  property string attachmentPickerError: ""
+  property string copiedAttachmentId: ""
+  property string _attachmentPickerMode: ""
+  property string _attachmentPickerOutput: ""
+  property string _attachmentPickerError: ""
+  property bool _attachmentPickerReturning: false
+  property bool _attachmentPickerReturnSearchOpen: false
+  property string _attachmentPickerReturnSearchQuery: ""
+  property string _pathCopyText: ""
   readonly property var spinnerFrames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   readonly property string spinnerFrame: spinnerFrames[spinnerIndex]
   readonly property var displayedMessages: filterMessages(mesh.messages, searchQuery)
@@ -81,10 +92,188 @@ Panel {
     var result = []
     for (var i = 0; i < values.length; i++) {
       var message = values[i] || {}
-      var haystack = String(message.body || "") + " " + String(message.from || "")
+      var haystack = String(message.body || "") + " " + String(message.from || "") + " " + String(message.name || "")
       if (haystack.toLowerCase().indexOf(needle) !== -1) result.push(message)
     }
     return result
+  }
+
+  function pathName(path) {
+    var value = String(path || "").replace(/\/+$/, "")
+    var separator = value.lastIndexOf("/")
+    return separator >= 0 ? value.substring(separator + 1) : value
+  }
+
+  function attachmentName(item) {
+    var name = String(item && item.name || "Attachment")
+    return String(item && item.attachmentKind || "") === "directory_tar_v1" && /\.tar$/i.test(name)
+      ? name.substring(0, name.length - 4) : name
+  }
+
+  function formatBytes(value) {
+    var bytes = Number(value || 0)
+    if (!isFinite(bytes) || bytes < 0) return "Unknown size"
+    if (bytes < 1024) return bytes + " B"
+    var units = ["KiB", "MiB", "GiB"]
+    var amount = bytes
+    var unit = "B"
+    for (var i = 0; i < units.length && amount >= 1024; i++) {
+      amount /= 1024
+      unit = units[i]
+    }
+    var formatted = amount >= 10 ? amount.toFixed(1) : amount.toFixed(2)
+    return formatted.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") + " " + unit
+  }
+
+  function restoreChatFocus() {
+    if (!root.opened || root.settingsOpen || root.clipboardOpen || !mesh.running) return
+    Qt.callLater(function() {
+      if (root.searchOpen) searchField.forceActiveFocus()
+      else messageField.forceActiveFocus()
+    })
+  }
+
+  function clearAttachmentDraft() {
+    attachmentDraft = null
+    restoreChatFocus()
+  }
+
+  function stageAttachment(path, kind) {
+    var value = String(path || "")
+    var attachmentKind = String(kind || "")
+    var name = pathName(value)
+    if (value.charAt(0) !== "/" || /[\r\n\0]/.test(value) || name === ""
+        || (attachmentKind !== "file" && attachmentKind !== "directory_tar_v1")) {
+      attachmentPickerError = "Could not use the selected local path"
+      restoreChatFocus()
+      return
+    }
+    attachmentPickerError = ""
+    attachmentDraft = { path: value, name: name, attachmentKind: attachmentKind }
+    Qt.callLater(function() { shareAttachmentButton.forceActiveFocus() })
+  }
+
+  function shareDraft() {
+    var draft = attachmentDraft
+    if (!draft) return
+    if (mesh.shareAttachment(draft.path, draft.name, draft.attachmentKind)) clearAttachmentDraft()
+  }
+
+  function downloadAttachment(timelineId) {
+    mesh.prepareDownload(timelineId, "")
+  }
+
+  function chooseDownloadFolder(timelineId) {
+    var id = String(timelineId || "")
+    if (id !== "") startAttachmentPicker("save-folder", id)
+  }
+
+  function startAttachmentPicker(mode, timelineId) {
+    var value = String(mode || "")
+    if (attachmentPickerBusy || mesh.attachmentBusy) return false
+    if (value !== "share-file" && value !== "share-folder" && value !== "save-folder") return false
+    var pendingId = String(timelineId || "")
+    if (value === "save-folder" && pendingId === "") return false
+    attachmentMenu.close()
+    attachmentPickerError = ""
+    _attachmentPickerMode = value
+    _attachmentPickerOutput = ""
+    _attachmentPickerError = ""
+    _attachmentPickerReturnSearchOpen = searchOpen
+    _attachmentPickerReturnSearchQuery = searchQuery
+    pendingDownloadAttachmentId = pendingId
+    attachmentPickerBusy = true
+    root.close()
+    attachmentPickerProcess.command = [
+      "timeout", "--signal=TERM", "--kill-after=5s", "310s",
+      Quickshell.env("HOME") + "/.config/omarchy/plugins/eldar.meshmsg/attachment-picker.py",
+      value
+    ]
+    attachmentPickerProcess.running = true
+    return true
+  }
+
+  function finishAttachmentPicker(exitCode) {
+    var mode = _attachmentPickerMode
+    var pendingId = pendingDownloadAttachmentId
+    var output = stripFinalLineEnding(_attachmentPickerOutput)
+    var error = String(_attachmentPickerError || "").replace(/\s+/g, " ").trim()
+    _attachmentPickerMode = ""
+    _attachmentPickerOutput = ""
+    _attachmentPickerError = ""
+    pendingDownloadAttachmentId = ""
+    attachmentPickerBusy = false
+    _attachmentPickerReturning = true
+    root.open()
+    Qt.callLater(function() {
+      if (exitCode === 0) {
+        if (output.charAt(0) !== "/" || /[\r\n\0]/.test(output)) {
+          root.attachmentPickerError = "The attachment picker returned an invalid local path"
+          root.restoreChatFocus()
+        } else if (mode === "share-file") {
+          root.stageAttachment(output, "file")
+        } else if (mode === "share-folder") {
+          root.stageAttachment(output, "directory_tar_v1")
+        } else if (mode === "save-folder") {
+          if (!mesh.prepareDownload(pendingId, output)) {
+            root.attachmentPickerError = "The attachment is no longer available to download"
+          }
+          root.restoreChatFocus()
+        }
+      } else {
+        if (exitCode !== 2) root.attachmentPickerError = error !== "" ? error : "Could not open the attachment picker"
+        root.restoreChatFocus()
+      }
+    })
+  }
+
+  function stripFinalLineEnding(text) {
+    var value = String(text || "")
+    if (value.endsWith("\n")) {
+      value = value.substring(0, value.length - 1)
+      if (value.endsWith("\r")) value = value.substring(0, value.length - 1)
+    }
+    return value
+  }
+
+  function openAttachmentMenu() {
+    if (attachmentPickerBusy || mesh.attachmentBusy) return
+    attachmentPickerError = ""
+    attachmentMenu.popup(composerAttachButton, 0, composerAttachButton.height)
+  }
+
+  function chatContentVisible() {
+    return root.opened && !root.settingsOpen && !root.clipboardOpen && !root.searchOpen
+      && !attachmentPickerBusy
+  }
+
+  function markChatRead() {
+    if (chatContentVisible()) unread = 0
+  }
+
+  function openPath(path) {
+    var value = String(path || "")
+    if (value !== "") Quickshell.execDetached(["uwsm-app", "--", "xdg-open", value])
+  }
+
+  function showInFiles(path, directory) {
+    var value = String(path || "")
+    if (value === "") return
+    if (directory) {
+      openPath(value)
+      return
+    }
+    Quickshell.execDetached(["uwsm-app", "--", "nautilus", "--select", Util.fileUrl(value)])
+  }
+
+  function copyAttachmentPath(item) {
+    var value = String(item && item.outputPath || "")
+    if (value === "" || pathCopyProcess.running) return
+    _pathCopyText = value
+    copiedAttachmentId = String(item.id || "")
+    pathCopyProcess.stdinEnabled = true
+    pathCopyProcess.command = ["wl-copy"]
+    pathCopyProcess.running = true
   }
 
   function moveMessageCursor(delta) {
@@ -106,6 +295,7 @@ Panel {
   function closeSearch() {
     searchOpen = false
     searchQuery = ""
+    markChatRead()
     if (mesh.running) Qt.callLater(function() { messageField.forceActiveFocus() })
   }
 
@@ -170,6 +360,7 @@ Panel {
       Qt.callLater(function() { clipboardSearchField.forceActiveFocus() })
     } else {
       clipboardSearchField.focus = false
+      root.markChatRead()
       if (mesh.running) chatFocusTimer.restart()
     }
   }
@@ -246,27 +437,78 @@ Panel {
     } else {
       if (inviteQrOpen) closeInviteQr()
       statusSurface.focus = false
+      root.markChatRead()
       if (mesh.running) chatFocusTimer.restart()
     }
   }
 
   onOpenedChanged: if (opened) {
-    settingsOpen = false
-    clipboardOpen = false
-    searchOpen = false
-    searchQuery = ""
-    unread = 0
-    previousMessageCount = mesh.messages.length
+    var pickerReturn = _attachmentPickerReturning
+    if (pickerReturn) {
+      _attachmentPickerReturning = false
+      settingsOpen = false
+      clipboardOpen = false
+      searchOpen = _attachmentPickerReturnSearchOpen
+      searchQuery = _attachmentPickerReturnSearchQuery
+    } else {
+      settingsOpen = false
+      clipboardOpen = false
+      searchOpen = false
+      searchQuery = ""
+    }
+    if (!searchOpen) unread = 0
     mesh.refresh()
     Qt.callLater(function() {
       root.scrollToBottom()
-      if (mesh.running) messageField.forceActiveFocus()
+      if (!pickerReturn && mesh.running) messageField.forceActiveFocus()
     })
   }
 
   Service {
     id: mesh
     settings: root.settings
+  }
+
+  Menu {
+    id: attachmentMenu
+    popupType: Popup.Item
+    MenuItem {
+      text: "Share a file…"
+      onTriggered: root.startAttachmentPicker("share-file", "")
+    }
+    MenuItem {
+      text: "Share a folder snapshot…"
+      onTriggered: root.startAttachmentPicker("share-folder", "")
+    }
+  }
+
+  Process {
+    id: attachmentPickerProcess
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root._attachmentPickerOutput = text
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root._attachmentPickerError = text
+    }
+    onExited: function(exitCode) { root.finishAttachmentPicker(exitCode) }
+  }
+
+  Process {
+    id: pathCopyProcess
+    stdinEnabled: true
+    onStarted: {
+      write(root._pathCopyText)
+      root._pathCopyText = ""
+      stdinEnabled = false
+    }
+    onExited: function(exitCode) {
+      stdinEnabled = true
+      root._pathCopyText = ""
+      if (exitCode !== 0) root.copiedAttachmentId = ""
+      else copiedAttachmentClear.restart()
+    }
   }
 
   Process {
@@ -300,12 +542,11 @@ Panel {
 
   Connections {
     target: mesh
-    function onMessagesChanged() {
-      var count = mesh.messages.length
-      if (!root.opened && count > root.previousMessageCount)
-        root.unread += count - root.previousMessageCount
-      root.previousMessageCount = count
+    function onTimelineItemAdded() {
       if (root.opened) Qt.callLater(root.scrollToBottom)
+    }
+    function onIncomingActivity() {
+      if (!root.chatContentVisible()) root.unread += 1
     }
     function onRunningChanged() {
       if (mesh.running) root.showJoin = false
@@ -314,18 +555,27 @@ Panel {
 
   IpcHandler {
     target: root.ipcTarget
-    function open(): void { root.open() }
+    function open(): void { if (!root.attachmentPickerBusy) root.open() }
     function close(): void { root.close() }
-    function show(): void { root.open() }
+    function show(): void { if (!root.attachmentPickerBusy) root.open() }
     function hide(): void { root.close() }
-    function toggle(): void { root.toggle() }
+    function toggle(): void { if (!root.attachmentPickerBusy) root.toggle() }
     function refresh(): string { mesh.refresh(); return "ok" }
     function start(): string { mesh.startDaemon(); return "ok" }
     function stop(): string { mesh.stopDaemon(); return "ok" }
-    function settings(): string { root.open(); root.setSettingsSurface(true); return "ok" }
-    function clipboard(): string { root.open(); root.setClipboardSurface(true); return "ok" }
+    function settings(): string {
+      if (root.attachmentPickerBusy) return "busy"
+      root.open(); root.setSettingsSurface(true); return "ok"
+    }
+    function clipboard(): string {
+      if (root.attachmentPickerBusy) return "busy"
+      root.open(); root.setClipboardSurface(true); return "ok"
+    }
     function copyInvite(): string { return mesh.copyInvite() ? "ok" : "unavailable" }
-    function inviteQr(): string { root.open(); root.setSettingsSurface(true); root.showInviteQr(); return "ok" }
+    function inviteQr(): string {
+      if (root.attachmentPickerBusy) return "busy"
+      root.open(); root.setSettingsSurface(true); root.showInviteQr(); return "ok"
+    }
     function status(): string {
       return JSON.stringify({ running: mesh.running, connected: mesh.topicJoined, neighbors: mesh.neighbors, peer: mesh.peer })
     }
@@ -387,10 +637,18 @@ Panel {
   }
 
   Shortcut {
-    sequence: "Tab"
+    sequence: "Ctrl+Shift+V"
     context: Qt.ApplicationShortcut
     enabled: root.opened
     onActivated: root.setClipboardSurface(!root.clipboardOpen)
+  }
+
+  Shortcut {
+    sequence: "Ctrl+O"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && !root.settingsOpen && !root.clipboardOpen && mesh.running
+      && !mesh.attachmentBusy && !root.attachmentPickerBusy
+    onActivated: root.openAttachmentMenu()
   }
 
   Shortcut {
@@ -412,6 +670,13 @@ Panel {
     interval: 1200
     repeat: false
     onTriggered: root.copiedStatusKey = ""
+  }
+
+  Timer {
+    id: copiedAttachmentClear
+    interval: 1200
+    repeat: false
+    onTriggered: root.copiedAttachmentId = ""
   }
 
   Timer {
@@ -445,11 +710,11 @@ Panel {
     fontFamily: root.fontFamily
     fontSize: Style.font.icon
     horizontalMargin: 8
-    tooltipText: root.unread > 0 ? root.unread + " unread meshmsg message" + (root.unread === 1 ? "" : "s")
+    tooltipText: root.unread > 0 ? root.unread + " unread meshmsg item" + (root.unread === 1 ? "" : "s")
       : "Meshmsg · " + root.connectionLabel.toLowerCase()
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.MiddleButton) mesh.refresh()
-      else root.toggle()
+      else if (!root.attachmentPickerBusy) root.toggle()
     }
   }
 
@@ -537,16 +802,17 @@ Panel {
         Button {
           visible: mesh.installed
           text: mesh.starting ? root.spinnerFrame + " Starting" : (mesh.running ? "Stop" : "Start")
-          enabled: !mesh.busy
+          enabled: mesh.running ? !mesh.stopping : !mesh.busy
           onClicked: mesh.running ? mesh.stopDaemon() : mesh.startDaemon()
         }
       }
 
       Text {
-        visible: mesh.actionStatus !== "" || mesh.lastError !== ""
+        visible: mesh.actionStatus !== "" || mesh.lastError !== "" || root.attachmentPickerError !== ""
         Layout.fillWidth: true
-        text: mesh.lastError !== "" ? mesh.lastError : mesh.actionStatus
-        color: mesh.lastError !== "" ? root.urgent : root.dim
+        text: root.attachmentPickerError !== "" ? root.attachmentPickerError
+          : (mesh.lastError !== "" ? mesh.lastError : mesh.actionStatus)
+        color: root.attachmentPickerError !== "" || mesh.lastError !== "" ? root.urgent : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.bodySmall
         wrapMode: Text.WordWrap
@@ -579,7 +845,7 @@ Panel {
       Item {
         visible: mesh.installed && mesh.running
         Layout.fillWidth: true
-        Layout.preferredHeight: Style.space(360)
+        Layout.preferredHeight: root.attachmentDraft ? Style.space(292) : Style.space(360)
         clip: true
 
         Rectangle {
@@ -683,6 +949,19 @@ Panel {
             required property var modelData
             required property int index
             property bool copied: false
+            readonly property bool isAttachment: String(modelData.itemKind || "text") === "attachment"
+            readonly property bool isDirectoryAttachment: String(modelData.attachmentKind || "") === "directory_tar_v1"
+            readonly property string attachmentState: String(modelData.state || "")
+            readonly property string attachmentStatus: {
+              if (attachmentState === "sharing") return isDirectoryAttachment ? "Preparing and sharing folder snapshot…" : "Sharing file…"
+              if (attachmentState === "shared") return modelData.deliveryAcknowledged ? "Offer shared · delivery acknowledged" : "Offer shared · delivery not acknowledged"
+              if (attachmentState === "preparing_download") return "Preparing download…"
+              if (attachmentState === "queued") return "Preparing download…"
+              if (attachmentState === "downloading") return "Downloading…"
+              if (attachmentState === "complete") return "Saved as " + root.pathName(modelData.outputPath)
+              if (attachmentState === "failed") return String(modelData.error || "Attachment operation failed")
+              return "Not downloaded · plaintext attachment"
+            }
             width: messageList.width
             height: bubble.implicitHeight
 
@@ -796,21 +1075,130 @@ Panel {
 
                 Text {
                   id: messageBody
+                  visible: !messageDelegate.isAttachment
                   width: parent.width
                   rightPadding: Style.space(30)
                   topPadding: Style.space(3)
                   bottomPadding: Style.space(2)
-                  text: modelData.body
+                  text: String(modelData.body || "")
                   color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
                   wrapMode: Text.WrapAnywhere
                   renderType: Text.NativeRendering
                 }
+
+                ColumnLayout {
+                  visible: messageDelegate.isAttachment
+                  width: parent.width
+                  spacing: Style.space(6)
+
+                  RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.space(9)
+
+                    Text {
+                      text: messageDelegate.isDirectoryAttachment ? "󰉋" : "󰈔"
+                      color: modelData.outgoing ? root.accent : root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.display
+                    }
+
+                    ColumnLayout {
+                      Layout.fillWidth: true
+                      spacing: 0
+                      Text {
+                        Layout.fillWidth: true
+                        text: root.attachmentName(modelData)
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.body
+                        font.bold: true
+                        elide: Text.ElideMiddle
+                      }
+                      Text {
+                        Layout.fillWidth: true
+                        text: (messageDelegate.isDirectoryAttachment ? "Folder snapshot" : "File")
+                          + (messageDelegate.attachmentState === "sharing" ? "" : " · " + root.formatBytes(modelData.size))
+                        color: root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
+                  }
+
+                  ProgressBar {
+                    Layout.fillWidth: true
+                    visible: messageDelegate.attachmentState === "preparing_download"
+                      || messageDelegate.attachmentState === "queued"
+                      || messageDelegate.attachmentState === "downloading"
+                    from: 0
+                    to: Math.max(1, Number(modelData.totalBytes || modelData.size || 1))
+                    value: Number(modelData.receivedBytes || 0)
+                    indeterminate: Number(modelData.receivedBytes || 0) <= 0
+                  }
+
+                  Text {
+                    Layout.fillWidth: true
+                    text: messageDelegate.attachmentState === "downloading" && Number(modelData.receivedBytes || 0) > 0
+                      ? root.formatBytes(modelData.receivedBytes) + " / " + root.formatBytes(modelData.totalBytes || modelData.size)
+                      : messageDelegate.attachmentStatus
+                    color: messageDelegate.attachmentState === "failed" ? root.urgent : root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                    elide: Text.ElideRight
+                    maximumLineCount: 2
+                  }
+
+                  RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.space(6)
+                    visible: messageDelegate.attachmentState === "offered" || messageDelegate.attachmentState === "failed"
+
+                    Item { Layout.fillWidth: true }
+                    Button {
+                      visible: !modelData.outgoing
+                      text: "Save elsewhere…"
+                      enabled: !mesh.attachmentBusy && !root.attachmentPickerBusy
+                      onClicked: root.chooseDownloadFolder(modelData.id)
+                    }
+                    Button {
+                      text: messageDelegate.attachmentState === "failed" ? "Retry" : (messageDelegate.isDirectoryAttachment ? "Download folder" : "Download")
+                      enabled: !mesh.attachmentBusy && !root.attachmentPickerBusy
+                      onClicked: {
+                        if (messageDelegate.attachmentState === "failed") mesh.retryAttachment(modelData.id)
+                        else root.downloadAttachment(modelData.id)
+                      }
+                    }
+                  }
+
+                  RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.space(6)
+                    visible: messageDelegate.attachmentState === "complete"
+
+                    Item { Layout.fillWidth: true }
+                    Button {
+                      text: root.copiedAttachmentId === String(modelData.id || "") ? "Copied" : "Copy path"
+                      onClicked: root.copyAttachmentPath(modelData)
+                    }
+                    Button {
+                      text: messageDelegate.isDirectoryAttachment ? "Open folder" : "Show in Files"
+                      onClicked: root.showInFiles(modelData.outputPath, messageDelegate.isDirectoryAttachment)
+                    }
+                    Button {
+                      visible: !messageDelegate.isDirectoryAttachment
+                      text: "Open"
+                      onClicked: root.openPath(modelData.outputPath)
+                    }
+                  }
+                }
               }
 
               Rectangle {
                 id: copyButton
+                visible: !messageDelegate.isAttachment
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.margins: Style.space(7)
@@ -864,11 +1252,78 @@ Panel {
         foreground: root.foreground
       }
 
+      Rectangle {
+        visible: mesh.installed && mesh.running && root.attachmentDraft !== null
+        Layout.fillWidth: true
+        implicitHeight: attachmentDraftContent.implicitHeight + Style.space(16)
+        color: root.subtle
+        border.width: 1
+        border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+        radius: Style.cornerRadius
+
+        ColumnLayout {
+          id: attachmentDraftContent
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.margins: Style.space(8)
+          spacing: Style.space(5)
+
+          RowLayout {
+            Layout.fillWidth: true
+            spacing: Style.space(8)
+            Text {
+              text: root.attachmentDraft && root.attachmentDraft.attachmentKind === "directory_tar_v1" ? "󰉋" : "󰈔"
+              color: root.accent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.icon
+            }
+            Text {
+              Layout.fillWidth: true
+              text: root.attachmentDraft ? root.attachmentDraft.name : ""
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+              elide: Text.ElideMiddle
+            }
+            Button {
+              text: "Remove"
+              onClicked: root.clearAttachmentDraft()
+            }
+            Button {
+              id: shareAttachmentButton
+              text: root.attachmentDraft && root.attachmentDraft.attachmentKind === "directory_tar_v1" ? "Share snapshot" : "Share file"
+              enabled: !mesh.attachmentBusy && !root.attachmentPickerBusy
+              onClicked: root.shareDraft()
+            }
+          }
+
+          Text {
+            Layout.fillWidth: true
+            text: "Plaintext to everyone in this chat · shared offers cannot currently be revoked"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+        }
+      }
+
       RowLayout {
         visible: mesh.installed && mesh.running
         Layout.fillWidth: true
         spacing: Style.space(8)
 
+        Button {
+          id: composerAttachButton
+          text: "󰈔"
+          enabled: !mesh.attachmentBusy && !root.attachmentPickerBusy
+          Accessible.name: "Attach a file or folder"
+          onClicked: root.openAttachmentMenu()
+          ToolTip.visible: hovered
+          ToolTip.text: mesh.attachmentBusy ? "Another attachment operation is active" : "Share a file or folder (Ctrl+O)"
+        }
         TextField {
           id: messageField
           Layout.fillWidth: true
@@ -951,13 +1406,13 @@ Panel {
         Layout.fillWidth: true
         Text {
           Layout.fillWidth: true
-          text: "esc  close · tab  clipboard · ctrl+s  settings · ↑↓  messages · ctrl+f  search"
+          text: "esc  close · ctrl+o  attach · ctrl+shift+v  clipboard · ctrl+s  settings · ctrl+f  search"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }
         Text {
-          visible: mesh.messages.length > 0
+          visible: mesh.messages.length > 0 && !mesh.attachmentBusy
           text: "CLEAR"
           color: root.dim
           font.family: root.fontFamily
@@ -1089,7 +1544,7 @@ Panel {
 
           Text {
             Layout.fillWidth: true
-            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "esc  back · ctrl+s  chat · tab  clipboard · c  copy invite · q  qr invite"
+            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "esc  back · ctrl+s  chat · ctrl+shift+v  clipboard · c  copy invite · q  qr invite"
             color: mesh.inviteCopyError !== "" ? root.urgent : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -1439,7 +1894,7 @@ Panel {
 
           Text {
             Layout.fillWidth: true
-            text: "esc  back · tab  chat · ctrl+s  settings · ↑↓  select · enter  broadcast"
+            text: "esc  back · ctrl+shift+v  chat · ctrl+s  settings · ↑↓  select · enter  broadcast"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

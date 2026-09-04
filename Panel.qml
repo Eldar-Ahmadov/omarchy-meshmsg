@@ -833,18 +833,20 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
+    centerOnBar: true
     // Focus is assigned by chatFocusTimer after the opening animation. Letting
     // KeyboardPanel focus the field immediately can create a stale blinking
     // cursor at the field's pre-layout position.
     focusTarget: null
-    contentWidth: panel.fittedContentWidth(Style.space(645))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight + Style.space(28), Style.space(620))
+    contentWidth: panel.fittedContentWidth(panel.screenW * 0.6)
+    contentHeight: Math.max(1, Math.round(panel.availableCardHeight))
 
     ColumnLayout {
       id: content
       x: Style.space(14)
       y: Style.space(14)
       width: parent.width - Style.space(28)
+      height: parent.height - Style.space(28)
 
       // Toggle this handler after the panel opens so Qt reapplies the arrow
       // even when the pointer has not moved since shell startup.
@@ -964,7 +966,8 @@ Panel {
       Item {
         visible: mesh.installed && mesh.running
         Layout.fillWidth: true
-        Layout.preferredHeight: root.attachmentDraft ? Style.space(292) : Style.space(360)
+        Layout.fillHeight: true
+        Layout.minimumHeight: root.attachmentDraft ? Style.space(292) : Style.space(360)
         clip: true
 
         Rectangle {

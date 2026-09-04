@@ -20,6 +20,7 @@ Panel {
   property bool searchOpen: false
   property string searchQuery: ""
   property bool clipboardOpen: false
+  property bool helpOpen: false
   property string clipboardQuery: ""
   property var clipboardHistory: []
   property int clipboardIndex: 0
@@ -48,6 +49,24 @@ Panel {
   readonly property var displayedMessages: filterMessages(mesh.messages, searchQuery)
   readonly property var displayedClipboard: filterClipboard(clipboardHistory, clipboardQuery)
   readonly property string clipboardHistoryPath: Quickshell.env("HOME") + "/.local/state/omarchy/clipboard-history.json"
+  readonly property var keyBindings: [
+    { key: "Ctrl+K", action: "Open or close this keyboard help" },
+    { key: "Esc", action: "Back one surface, or close Meshmsg" },
+    { key: "Ctrl+O", action: "Choose a file to share" },
+    { key: "Ctrl+Shift+O", action: "Choose a folder snapshot to share" },
+    { key: "Ctrl+Shift+V", action: "Switch between chat and clipboard" },
+    { key: "Ctrl+S", action: "Switch between chat and status" },
+    { key: "Ctrl+F", action: "Search messages" },
+    { key: "↑ / ↓", action: "Move through messages or clipboard entries" },
+    { key: "Enter", action: "Send, share, or broadcast the focused item" },
+    { key: "C", action: "Copy invite while viewing status" },
+    { key: "Q", action: "Show invite QR code while viewing status" },
+    { key: "Picker: type", action: "Fuzzy-filter the current folder" },
+    { key: "Picker: Enter", action: "Open a folder or choose a file" },
+    { key: "Picker: Alt+Enter", action: "Choose a folder" },
+    { key: "Picker: Ctrl+F", action: "Toggle recursive search" },
+    { key: "Picker: Esc", action: "Cancel selection" }
+  ]
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -126,7 +145,7 @@ Panel {
   }
 
   function restoreChatFocus() {
-    if (!root.opened || root.settingsOpen || root.clipboardOpen || !mesh.running) return
+    if (!root.opened || root.settingsOpen || root.clipboardOpen || root.helpOpen || !mesh.running) return
     Qt.callLater(function() {
       if (root.searchOpen) searchField.forceActiveFocus()
       else messageField.forceActiveFocus()
@@ -134,6 +153,7 @@ Panel {
   }
 
   function clearAttachmentDraft() {
+    shareAttachmentFocusTimer.stop()
     attachmentDraft = null
     restoreChatFocus()
   }
@@ -153,7 +173,9 @@ Panel {
     }
     attachmentPickerError = ""
     attachmentDraft = { path: value, name: name, attachmentKind: attachmentKind }
-    Qt.callLater(function() { shareAttachmentButton.forceActiveFocus() })
+    // Let the attachment card finish entering the layout before focusing its
+    // primary action, so Return can share immediately.
+    shareAttachmentFocusTimer.restart()
   }
 
   function shareDraft() {
@@ -246,7 +268,7 @@ Panel {
   }
 
   function chatContentVisible() {
-    return root.opened && !root.settingsOpen && !root.clipboardOpen && !root.searchOpen
+    return root.opened && !root.settingsOpen && !root.clipboardOpen && !root.helpOpen && !root.searchOpen
       && !attachmentPickerBusy
   }
 
@@ -349,6 +371,7 @@ Panel {
   }
 
   function setClipboardSurface(open) {
+    helpOpen = false
     clipboardOpen = open
     if (open) {
       if (inviteQrOpen) closeInviteQr()
@@ -427,6 +450,7 @@ Panel {
   }
 
   function setSettingsSurface(open) {
+    helpOpen = false
     settingsOpen = open
     if (open) {
       clipboardOpen = false
@@ -447,6 +471,7 @@ Panel {
 
   onOpenedChanged: {
     if (!opened) {
+      helpOpen = false
       chatFocusTimer.stop()
       messageField.focus = false
       inviteField.focus = false
@@ -595,7 +620,8 @@ Panel {
     context: Qt.ApplicationShortcut
     enabled: root.opened
     onActivated: {
-      if (root.inviteQrOpen) root.closeInviteQr()
+      if (root.helpOpen) root.helpOpen = false
+      else if (root.inviteQrOpen) root.closeInviteQr()
       else if (root.clipboardOpen) root.setClipboardSurface(false)
       else if (root.searchOpen) root.closeSearch()
       else if (root.settingsOpen) root.setSettingsSurface(false)
@@ -615,6 +641,13 @@ Panel {
     context: Qt.ApplicationShortcut
     enabled: root.opened && !root.settingsOpen && !root.clipboardOpen && messageList.count > 0
     onActivated: root.moveMessageCursor(1)
+  }
+
+  Shortcut {
+    sequence: "Ctrl+K"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened
+    onActivated: root.helpOpen = !root.helpOpen
   }
 
   Shortcut {
@@ -646,6 +679,14 @@ Panel {
   }
 
   Shortcut {
+    sequence: "Return"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && root.attachmentDraft && shareAttachmentButton.activeFocus
+      && shareAttachmentButton.enabled
+    onActivated: root.shareDraft()
+  }
+
+  Shortcut {
     sequence: "Ctrl+Shift+V"
     context: Qt.ApplicationShortcut
     enabled: root.opened
@@ -657,7 +698,15 @@ Panel {
     context: Qt.ApplicationShortcut
     enabled: root.opened && !root.settingsOpen && !root.clipboardOpen && mesh.running
       && !mesh.attachmentBusy && !root.attachmentPickerBusy
-    onActivated: root.openAttachmentMenu()
+    onActivated: root.startAttachmentPicker("share-file", "")
+  }
+
+  Shortcut {
+    sequence: "Ctrl+Shift+O"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && !root.settingsOpen && !root.clipboardOpen && mesh.running
+      && !mesh.attachmentBusy && !root.attachmentPickerBusy
+    onActivated: root.startAttachmentPicker("share-folder", "")
   }
 
   Shortcut {
@@ -671,7 +720,15 @@ Panel {
     id: chatFocusTimer
     interval: 240
     repeat: false
-    onTriggered: if (root.opened && !root.settingsOpen && !root.clipboardOpen && mesh.running) messageField.forceActiveFocus()
+    onTriggered: if (root.opened && !root.settingsOpen && !root.clipboardOpen && !root.helpOpen && mesh.running) messageField.forceActiveFocus()
+  }
+
+  Timer {
+    id: shareAttachmentFocusTimer
+    interval: 120
+    repeat: false
+    onTriggered: if (root.opened && root.attachmentDraft && shareAttachmentButton.enabled)
+      shareAttachmentButton.forceActiveFocus(Qt.TabFocusReason)
   }
 
   Timer {
@@ -745,6 +802,13 @@ Panel {
       x: Style.space(14)
       y: Style.space(14)
       width: parent.width - Style.space(28)
+
+      // Keep a stable arrow over the panel background. When the composer moves
+      // after staging an attachment, Qt does not always resend a hover event
+      // for the stationary pointer and can leave its text-beam cursor behind.
+      HoverHandler {
+        cursorShape: Qt.ArrowCursor
+      }
       spacing: Style.space(12)
       visible: (!root.settingsOpen && !root.clipboardOpen) || chatRotation.angle > -89.9
       opacity: 1.0 - Math.abs(chatRotation.angle) / 90.0
@@ -865,20 +929,19 @@ Panel {
           anchors.top: parent.top
           anchors.left: parent.left
           anchors.right: parent.right
-          anchors.margins: Style.space(8)
           height: Style.space(44)
           z: 3
           visible: root.searchOpen
-          radius: Style.space(10)
-          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06)
+          radius: 0
+          color: root.subtle
           border.width: 1
-          border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+          border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
 
           RowLayout {
             anchors.fill: parent
             anchors.leftMargin: Style.space(12)
-            anchors.rightMargin: Style.space(8)
-            spacing: Style.space(8)
+            anchors.rightMargin: Style.space(12)
+            spacing: Style.space(9)
 
             Text {
               text: "󰍉"
@@ -894,6 +957,11 @@ Panel {
               text: root.searchQuery
               font.family: root.fontFamily
               cursorVisible: activeFocus && root.opened && root.searchOpen
+              cursorDelegate: Rectangle {
+                width: 2
+                color: root.foreground
+                visible: searchField.cursorVisible
+              }
               background: Item {}
               onTextChanged: {
                 root.searchQuery = text
@@ -1335,7 +1403,7 @@ Panel {
           Accessible.name: "Attach a file or folder"
           onClicked: root.openAttachmentMenu()
           ToolTip.visible: hovered
-          ToolTip.text: mesh.attachmentBusy ? "Another attachment operation is active" : "Share a file or folder (Ctrl+O)"
+          ToolTip.text: mesh.attachmentBusy ? "Another attachment operation is active" : "Share a file or folder (Ctrl+O file · Ctrl+Shift+O folder)"
         }
         TextField {
           id: messageField
@@ -1344,6 +1412,11 @@ Panel {
           enabled: !mesh.sending
           font.family: root.fontFamily
           cursorVisible: activeFocus && root.opened && !root.settingsOpen && !root.clipboardOpen
+          cursorDelegate: Rectangle {
+            width: 2
+            color: root.foreground
+            visible: messageField.cursorVisible
+          }
           onAccepted: root.sendCurrent()
         }
         Button {
@@ -1395,6 +1468,11 @@ Panel {
             echoMode: root.revealInvite ? TextInput.Normal : TextInput.Password
             font.family: root.fontFamily
             cursorVisible: activeFocus && root.opened && root.showJoin
+            cursorDelegate: Rectangle {
+              width: 2
+              color: root.foreground
+              visible: inviteField.cursorVisible
+            }
             onAccepted: root.submitJoin()
           }
           Button {
@@ -1419,13 +1497,7 @@ Panel {
 
       RowLayout {
         Layout.fillWidth: true
-        Text {
-          Layout.fillWidth: true
-          text: "esc  close · ctrl+o  attach · ctrl+shift+v  clipboard · ctrl+s  settings · ctrl+f  search"
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
+        HelpLink { Layout.fillWidth: true }
         Text {
           visible: mesh.messages.length > 0 && !mesh.attachmentBusy
           text: "CLEAR"
@@ -1558,13 +1630,16 @@ Panel {
           spacing: Style.space(10)
 
           Text {
-            Layout.fillWidth: true
-            text: mesh.inviteCopyError !== "" ? mesh.inviteCopyError : "esc  back · ctrl+s  chat · ctrl+shift+v  clipboard · c  copy invite · q  qr invite"
-            color: mesh.inviteCopyError !== "" ? root.urgent : root.dim
+            visible: mesh.inviteCopyError !== ""
+            Layout.fillWidth: visible
+            text: mesh.inviteCopyError
+            color: root.urgent
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight
           }
+
+          HelpLink { Layout.fillWidth: mesh.inviteCopyError === "" }
 
           PanelActionButton {
             iconText: "󰐲"
@@ -1776,6 +1851,11 @@ Panel {
               text: root.clipboardQuery
               font.family: root.fontFamily
               cursorVisible: activeFocus && root.opened && root.clipboardOpen
+              cursorDelegate: Rectangle {
+                width: 2
+                color: root.foreground
+                visible: clipboardSearchField.cursorVisible
+              }
               background: Item {}
               onTextChanged: {
                 root.clipboardQuery = text
@@ -1908,13 +1988,7 @@ Panel {
           Layout.fillWidth: true
           spacing: Style.space(10)
 
-          Text {
-            Layout.fillWidth: true
-            text: "esc  back · ctrl+shift+v  chat · ctrl+s  settings · ↑↓  select · enter  broadcast"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
+          HelpLink { Layout.fillWidth: true }
 
           Button {
             text: mesh.sending ? "Broadcasting…" : "Broadcast"
@@ -1923,6 +1997,119 @@ Panel {
           }
         }
       }
+    }
+
+    Rectangle {
+      id: helpSurface
+      anchors.fill: parent
+      z: 40
+      visible: root.helpOpen || helpRotation.angle < 89.9
+      opacity: 1.0 - helpRotation.angle / 90.0
+      color: Color.background
+      radius: Style.cornerRadius
+      focus: root.helpOpen
+
+      transform: Rotation {
+        id: helpRotation
+        origin.x: helpSurface.width / 2
+        origin.y: helpSurface.height / 2
+        axis { x: 0; y: 1; z: 0 }
+        angle: root.helpOpen ? 0 : 90
+        Behavior on angle {
+          NumberAnimation { duration: 220; easing.type: Easing.InOutQuad }
+        }
+      }
+
+      ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: Style.space(16)
+        spacing: Style.space(10)
+
+        RowLayout {
+          Layout.fillWidth: true
+          spacing: Style.space(10)
+
+          PanelActionButton {
+            iconText: "󰁍"
+            tooltipText: "Back"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.helpOpen = false
+          }
+
+          Text {
+            Layout.fillWidth: true
+            text: "KEYBOARD HELP"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.heading
+            font.bold: true
+          }
+        }
+
+        PanelSeparator {
+          Layout.fillWidth: true
+          foreground: root.foreground
+        }
+
+        Rectangle {
+          Layout.fillWidth: true
+          Layout.fillHeight: true
+          color: root.subtle
+          radius: Style.cornerRadius
+
+          ListView {
+            anchors.fill: parent
+            anchors.margins: Style.space(10)
+            model: root.keyBindings
+            clip: true
+            spacing: Style.space(2)
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            delegate: RowLayout {
+              required property var modelData
+              width: ListView.view.width
+              height: Style.space(30)
+              spacing: Style.space(16)
+
+              Text {
+                Layout.preferredWidth: Style.space(145)
+                text: modelData.key
+                color: root.accent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+
+              Text {
+                Layout.fillWidth: true
+                text: modelData.action
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+              }
+            }
+          }
+        }
+
+        HelpLink { Layout.fillWidth: true }
+      }
+    }
+  }
+
+  component HelpLink: Text {
+    text: "ctrl+k  help"
+    color: root.dim
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.caption
+    font.bold: true
+
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: root.helpOpen = !root.helpOpen
     }
   }
 

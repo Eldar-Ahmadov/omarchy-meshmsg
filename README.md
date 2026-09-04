@@ -6,7 +6,7 @@ An Omarchy bar widget and chat panel backed by the local [`meshmsg`](https://git
 
 - live status and peer count
 - animated status surface with daemon, endpoint, topic, invite, bootstrap, identity, and IPC details
-- keyboard shortcuts: `Ctrl+O` opens attachment choices, `Ctrl+Shift+V` toggles clipboard/chat, `Ctrl+S` toggles settings/chat, `C` copies the invite, and `Q` opens its QR code
+- keyboard shortcuts: `Ctrl+O` picks a file, `Ctrl+Shift+O` picks a folder, `Ctrl+Shift+V` toggles clipboard/chat, `Ctrl+S` toggles settings/chat, `C` copies the invite, and `Q` opens its QR code
 - incoming and outgoing chat messages
 - explicit file and folder-snapshot sharing with inline transfer cards and progress
 - collision-safe downloads to the XDG Downloads directory, with optional destination selection

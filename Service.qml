@@ -83,6 +83,20 @@ Item {
     statusProcess.running = true
   }
 
+  function refreshAll() {
+    if (whichProcess.running) return
+    whichProcess.output = ""
+    whichProcess.command = [Quickshell.env("HOME") + "/.config/omarchy/plugins/eldar.meshmsg/resolve-meshmsg.sh"]
+    whichProcess.running = true
+  }
+
+  function refreshVersion() {
+    if (versionProcess.running || !installed) return
+    versionProcess.output = ""
+    versionProcess.command = [binaryPath, "--version"]
+    versionProcess.running = true
+  }
+
   function setUnavailable(message) {
     running = false
     endpointOnline = false
@@ -223,10 +237,7 @@ Item {
     messages = []
   }
 
-  Component.onCompleted: {
-    whichProcess.command = [Quickshell.env("HOME") + "/.config/omarchy/plugins/eldar.meshmsg/resolve-meshmsg.sh"]
-    whichProcess.running = true
-  }
+  Component.onCompleted: root.refreshAll()
 
   Timer {
     id: pollTimer
@@ -272,8 +283,7 @@ Item {
       root.binaryPath = exitCode === 0 ? whichProcess.output : ""
       root.installed = root.binaryPath !== ""
       if (root.installed) {
-        versionProcess.command = [root.binaryPath, "--version"]
-        versionProcess.running = true
+        root.refreshVersion()
         root.refresh()
       } else {
         root.version = ""

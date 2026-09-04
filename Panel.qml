@@ -1028,7 +1028,7 @@ Panel {
             foreground: root.foreground
             fontFamily: root.fontFamily
             enabled: mesh.installed
-            onClicked: mesh.refresh()
+            onClicked: mesh.refreshAll()
           }
         }
 

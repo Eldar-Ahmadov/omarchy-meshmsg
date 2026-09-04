@@ -29,7 +29,7 @@ Meshmsg is currently a trusted **plaintext** swarm. Anyone with an invite can re
 ## Requirements
 
 - meshmsg v0.1.9 or newer, preferably installed at `~/.local/bin/meshmsg`
-- Python with `dbus-python` and PyGObject, plus an XDG desktop portal FileChooser backend
+- Python, `fd`, `fzf`, and `xdg-terminal-exec` for the terminal attachment picker
 - a systemd user session
 - initialized or joined meshmsg state before starting, or an invite entered in the panel
 
@@ -39,7 +39,7 @@ Install the latest verified release with the upstream installer:
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/Eldar-Ahmadov/meshmsg/main/install.sh | bash
 ```
 
-The plugin capability-checks the installed binary for v0.1.9's attachment commands and secure `download --offer-stdin` input. Older binaries are reported as unavailable. Attachment selection runs in a standalone Python D-Bus helper; a portal/backend failure therefore reports an error without taking down the Omarchy shell.
+The plugin capability-checks the installed binary for v0.1.9's attachment commands and secure `download --offer-stdin` input. Older binaries are reported as unavailable. Attachment selection runs as an `fd` + `fzf` fuzzy finder in the configured terminal; picker failures therefore report an error without taking down the Omarchy shell.
 
 ## Persistent daemon
 

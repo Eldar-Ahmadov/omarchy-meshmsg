@@ -139,6 +139,9 @@ Panel {
   }
 
   function stageAttachment(path, kind) {
+    // Drop the composer's cursor before the attachment card changes the
+    // layout. Qt can otherwise retain its old cursor scene-graph node.
+    messageField.focus = false
     var value = String(path || "")
     var attachmentKind = String(kind || "")
     var name = pathName(value)
@@ -442,7 +445,13 @@ Panel {
     }
   }
 
-  onOpenedChanged: if (opened) {
+  onOpenedChanged: {
+    if (!opened) {
+      chatFocusTimer.stop()
+      messageField.focus = false
+      inviteField.focus = false
+      return
+    }
     var pickerReturn = _attachmentPickerReturning
     if (pickerReturn) {
       _attachmentPickerReturning = false
@@ -458,10 +467,10 @@ Panel {
     }
     if (!searchOpen) unread = 0
     mesh.refresh()
-    Qt.callLater(function() {
-      root.scrollToBottom()
-      if (!pickerReturn && mesh.running) messageField.forceActiveFocus()
-    })
+    Qt.callLater(root.scrollToBottom)
+    // Wait for the panel's opening/layout transition before showing a text
+    // cursor; focusing during that transition can leave a stale cursor quad.
+    if (!pickerReturn && mesh.running) chatFocusTimer.restart()
   }
 
   Service {
@@ -724,7 +733,10 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: mesh.running ? messageField : (root.showJoin ? inviteField : null)
+    // Focus is assigned by chatFocusTimer after the opening animation. Letting
+    // KeyboardPanel focus the field immediately can create a stale blinking
+    // cursor at the field's pre-layout position.
+    focusTarget: null
     contentWidth: panel.fittedContentWidth(Style.space(645))
     contentHeight: panel.fittedContentHeight(content.implicitHeight + Style.space(28), Style.space(620))
 
@@ -881,6 +893,7 @@ Panel {
               placeholderText: "Search messages or peer ID"
               text: root.searchQuery
               font.family: root.fontFamily
+              cursorVisible: activeFocus && root.opened && root.searchOpen
               background: Item {}
               onTextChanged: {
                 root.searchQuery = text
@@ -1330,6 +1343,7 @@ Panel {
           placeholderText: mesh.topicJoined ? "Message the chat" : "Message (daemon is still connecting)"
           enabled: !mesh.sending
           font.family: root.fontFamily
+          cursorVisible: activeFocus && root.opened && !root.settingsOpen && !root.clipboardOpen
           onAccepted: root.sendCurrent()
         }
         Button {
@@ -1380,6 +1394,7 @@ Panel {
             placeholderText: "Paste meshmsg invite"
             echoMode: root.revealInvite ? TextInput.Normal : TextInput.Password
             font.family: root.fontFamily
+            cursorVisible: activeFocus && root.opened && root.showJoin
             onAccepted: root.submitJoin()
           }
           Button {
@@ -1760,6 +1775,7 @@ Panel {
               placeholderText: "Search clipboard history"
               text: root.clipboardQuery
               font.family: root.fontFamily
+              cursorVisible: activeFocus && root.opened && root.clipboardOpen
               background: Item {}
               onTextChanged: {
                 root.clipboardQuery = text

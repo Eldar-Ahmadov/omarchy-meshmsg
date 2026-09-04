@@ -1,231 +1,192 @@
 #!/usr/bin/env python3
-"""Crash-isolated attachment picker backed by the desktop portal."""
+"""Crash-isolated terminal attachment picker using fd and fzf."""
 
 from __future__ import annotations
 
 import os
-import re
-import secrets
+import shutil
 import signal
+import subprocess
 import sys
-from urllib.parse import unquote_to_bytes, urlsplit
+import tempfile
+import time
+from pathlib import Path
 
 CANCELLED = 2
 FAILED = 1
 SUCCESS = 0
-PORTAL_BUS = "org.freedesktop.portal.Desktop"
-PORTAL_PATH = "/org/freedesktop/portal/desktop"
-FILE_CHOOSER_IFACE = "org.freedesktop.portal.FileChooser"
-REQUEST_IFACE = "org.freedesktop.portal.Request"
 INTERACTION_TIMEOUT_SECONDS = 300
-_INVALID_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 MODES = {
-    "share-file": ("Share a file", False, "file"),
-    "share-folder": ("Share a folder snapshot", True, "directory"),
-    "save-folder": ("Choose where to save the attachment", True, "directory"),
+    "share-file": ("Select a file to share", "file"),
+    "share-folder": ("Select a folder to share", "directory"),
+    "save-folder": ("Select a download folder", "directory"),
 }
 
 
-def canonical_path_from_uri(uri: str, expected_type: str) -> str:
-    if not isinstance(uri, str) or _INVALID_ESCAPE.search(uri):
-        raise ValueError("the chooser returned an invalid URI")
-    parsed = urlsplit(uri)
-    if parsed.scheme.casefold() != "file":
-        raise ValueError("the chooser did not return a local file")
-    if parsed.netloc and parsed.netloc.casefold() != "localhost":
-        raise ValueError("remote file locations are not supported")
-    if parsed.query or parsed.fragment:
-        raise ValueError("the chooser returned an invalid local file URI")
-    raw_path = unquote_to_bytes(parsed.path)
-    if b"\0" in raw_path:
-        raise ValueError("the selected path contains an invalid character")
-    path = os.fsdecode(raw_path)
-    if "\n" in path or "\r" in path:
-        raise ValueError("paths containing line breaks are not supported")
-    if not os.path.isabs(path):
-        raise ValueError("the chooser returned a relative path")
-    path = os.path.realpath(path)
-    if not os.path.isabs(path):
-        raise ValueError("the chooser returned an invalid path")
-    if expected_type == "file" and not os.path.isfile(path):
+def canonical_path(path: str, expected_type: str) -> str:
+    if not isinstance(path, str) or "\0" in path or "\n" in path or "\r" in path:
+        raise ValueError("the picker returned an invalid path")
+    value = os.path.realpath(path)
+    if not os.path.isabs(value):
+        raise ValueError("the picker returned a relative path")
+    if expected_type == "file" and not os.path.isfile(value):
         raise ValueError("the selected location is not a regular file")
-    if expected_type == "directory" and not os.path.isdir(path):
+    if expected_type == "directory" and not os.path.isdir(value):
         raise ValueError("the selected location is not a directory")
-    return path
+    return value
 
 
-def selected_path(response: int, results: object, expected_type: str) -> tuple[int, str]:
-    code = int(response)
-    if code == 1:
-        return CANCELLED, ""
-    if code != 0:
-        raise RuntimeError("the file chooser closed without a selection")
-    if not hasattr(results, "get"):
-        raise ValueError("the chooser returned malformed results")
-    uris = results.get("uris")
-    if not isinstance(uris, (list, tuple)) or len(uris) != 1:
-        raise ValueError("the chooser did not return exactly one selection")
-    return SUCCESS, canonical_path_from_uri(str(uris[0]), expected_type)
+def picker_commands(mode: str, root: str, recursive: bool = False) -> tuple[list[str], list[str]]:
+    title, expected_type = MODES[mode]
+    fd_command = [
+        "fd", "--absolute-path", "--color=never", "--hidden", "--print0",
+        "--exclude=.git", "--type=d",
+    ]
+    if expected_type == "file":
+        fd_command.append("--type=f")
+    if not recursive:
+        fd_command.append("--max-depth=1")
+    fd_command.extend([".", root])
+    action = "Enter open/select file" if expected_type == "file" else "Enter open · Alt+Enter select folder"
+    scope = "recursive" if recursive else "this folder"
+    fzf_command = [
+        "fzf", "--read0", "--print0", "--layout=reverse", "--border",
+        "--height=100%", "--scheme=path", "--expect=alt-enter,ctrl-f",
+        f"--prompt={title} › ",
+        f"--header={root} · {scope} · {action} · Ctrl+F toggle recursive · Esc cancel",
+    ]
+    return fd_command, fzf_command
 
 
-class PortalPicker:
-    def __init__(self, mode: str) -> None:
-        title, directory, expected_type = MODES[mode]
-        self.title = title
-        self.directory = directory
-        self.expected_type = expected_type
-        self.exit_code = FAILED
-        self.path = ""
-        self.error = ""
-        self.loop = None
-        self.bus = None
-        self.request_path = ""
-        self.predicted_path = ""
-        self.returned_path = ""
-        self.pending_responses: dict[str, tuple[object, object]] = {}
-        self.matches: list[object] = []
-        self.done = False
+def choose_in_terminal(mode: str, start: str) -> tuple[int, str]:
+    expected_type = MODES[mode][1]
+    current = os.path.realpath(start)
+    recursive = False
+    while True:
+        fd_command, fzf_command = picker_commands(mode, current, recursive)
+        scan = subprocess.run(fd_command, stdout=subprocess.PIPE)
+        if scan.returncode != 0:
+            raise RuntimeError(f"fd could not read {current}")
+        candidates = scan.stdout
+        parent = os.path.dirname(current)
+        if parent != current:
+            candidates = os.fsencode(parent) + b"\0" + candidates
+        if expected_type == "directory":
+            candidates = os.fsencode(current) + b"\0" + candidates
+        picker = subprocess.run(fzf_command, input=candidates, stdout=subprocess.PIPE)
+        if picker.returncode in (1, 130):
+            return CANCELLED, ""
+        if picker.returncode != SUCCESS:
+            raise RuntimeError(f"fzf exited with status {picker.returncode}")
+        fields = picker.stdout.split(b"\0")
+        key = os.fsdecode(fields[0]) if fields else ""
+        selected = os.fsdecode(fields[1]) if len(fields) > 1 else ""
+        if key == "ctrl-f":
+            recursive = not recursive
+            continue
+        path = canonical_path(selected, "directory" if os.path.isdir(selected) else "file")
+        if expected_type == "directory" and key == "alt-enter":
+            return SUCCESS, canonical_path(path, "directory")
+        if os.path.isdir(path):
+            current = path
+            recursive = False
+            continue
+        if expected_type == "file":
+            return SUCCESS, canonical_path(path, "file")
 
-    def finish(self, code: int, path: str = "", error: str = "") -> None:
-        if self.done:
-            return
-        self.done = True
-        self.exit_code = code
-        self.path = path
-        self.error = error
-        if self.loop is not None:
-            self.loop.quit()
 
-    def close_request(self) -> None:
-        if self.bus is None or not self.request_path:
-            return
+def write_status(directory: str, code: int, result: bytes = b"", error: str = "") -> None:
+    base = Path(directory)
+    if result:
+        (base / "result").write_bytes(result)
+    if error:
+        (base / "error").write_text(error, encoding="utf-8")
+    temporary = base / "status.tmp"
+    temporary.write_text(str(code), encoding="ascii")
+    temporary.replace(base / "status")
+
+
+def terminal_session(mode: str, directory: str) -> int:
+    try:
+        root = os.path.realpath(os.environ.get("HOME", "/"))
+        code, path = choose_in_terminal(mode, root)
+        if code == SUCCESS:
+            write_status(directory, SUCCESS, os.fsencode(path))
+        else:
+            write_status(directory, CANCELLED)
+        return code
+    except Exception as error:
+        write_status(directory, FAILED, error=f"could not run the terminal picker: {error}")
+        return FAILED
+
+
+def run_picker(mode: str) -> int:
+    for command in ("xdg-terminal-exec", "fd", "fzf"):
+        if shutil.which(command) is None:
+            print(f"required picker command is not installed: {command}", file=sys.stderr)
+            return FAILED
+
+    cancelled = False
+
+    def stop(_signum: int, _frame: object) -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    with tempfile.TemporaryDirectory(prefix="meshmsg-picker-") as directory:
+        os.chmod(directory, 0o700)
+        title = MODES[mode][0]
         try:
-            import dbus
+            launcher = subprocess.Popen([
+                "xdg-terminal-exec", f"--title=Meshmsg — {title}", "--",
+                sys.executable, os.path.realpath(__file__),
+                "--terminal-session", mode, directory,
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as error:
+            print(f"could not open the terminal picker: {error}", file=sys.stderr)
+            return FAILED
 
-            request = dbus.Interface(
-                self.bus.get_object(PORTAL_BUS, self.request_path), REQUEST_IFACE
-            )
-            request.Close(timeout=2)
-        except Exception:
-            pass
+        status_path = Path(directory) / "status"
+        deadline = time.monotonic() + INTERACTION_TIMEOUT_SECONDS
+        while not status_path.exists():
+            if cancelled:
+                launcher.terminate()
+                return CANCELLED
+            if time.monotonic() >= deadline:
+                launcher.terminate()
+                print("attachment picker timed out", file=sys.stderr)
+                return FAILED
+            launcher_code = launcher.poll()
+            if launcher_code not in (None, 0):
+                print(f"terminal picker exited with status {launcher_code}", file=sys.stderr)
+                return FAILED
+            time.sleep(0.05)
 
-    def on_response(self, response: object, results: object) -> None:
-        try:
-            code, path = selected_path(int(response), results, self.expected_type)
-            self.finish(code, path)
-        except (RuntimeError, ValueError) as error:
-            self.finish(FAILED, error=str(error))
-
-    def on_response_signal(
-        self,
-        response: object,
-        results: object,
-        signal_path: object | None = None,
-    ) -> None:
-        path = str(signal_path or "")
-        if path == self.predicted_path or (self.returned_path and path == self.returned_path):
-            self.on_response(response, results)
-        elif not self.returned_path and path and len(self.pending_responses) < 4:
-            # A conforming portal uses the predicted handle. Buffer an early
-            # response from a rewritten handle until OpenFile returns it.
-            self.pending_responses[path] = (response, results)
-
-    def on_timeout(self) -> bool:
-        self.close_request()
-        self.finish(FAILED, error="attachment picker timed out")
-        return False
-
-    def on_signal(self, *_args: object) -> bool:
-        self.close_request()
-        self.finish(CANCELLED)
-        return False
-
-    def on_portal_owner_changed(self, _name: object, old_owner: object, new_owner: object) -> None:
-        if str(old_owner) and not str(new_owner):
-            self.finish(FAILED, error="the desktop file chooser stopped unexpectedly")
-
-    def run(self) -> int:
-        try:
-            import dbus
-            from dbus.mainloop.glib import DBusGMainLoop
-            from gi.repository import GLib
-
-            DBusGMainLoop(set_as_default=True)
-            self.bus = dbus.SessionBus()
-            self.loop = GLib.MainLoop()
-            sender = self.bus.get_unique_name().lstrip(":").replace(".", "_")
-            token = "meshmsg_" + secrets.token_hex(12)
-            predicted = f"{PORTAL_PATH}/request/{sender}/{token}"
-            self.predicted_path = predicted
-            self.request_path = predicted
-            # Subscribe before OpenFile and include the signal path. A broad,
-            # portal-owner-filtered receiver also catches an early response if
-            # the backend rewrites handle_token and returns another path.
-            self.matches.append(
-                self.bus.add_signal_receiver(
-                    self.on_response_signal,
-                    signal_name="Response",
-                    dbus_interface=REQUEST_IFACE,
-                    bus_name=PORTAL_BUS,
-                    path_keyword="signal_path",
-                )
-            )
-            self.matches.append(
-                self.bus.add_signal_receiver(
-                    self.on_portal_owner_changed,
-                    signal_name="NameOwnerChanged",
-                    dbus_interface="org.freedesktop.DBus",
-                    bus_name="org.freedesktop.DBus",
-                    path="/org/freedesktop/DBus",
-                    arg0=PORTAL_BUS,
-                )
-            )
-            chooser = dbus.Interface(
-                self.bus.get_object(PORTAL_BUS, PORTAL_PATH), FILE_CHOOSER_IFACE
-            )
-            options = dbus.Dictionary(
-                {
-                    "handle_token": dbus.String(token),
-                    "modal": dbus.Boolean(False),
-                    "multiple": dbus.Boolean(False),
-                    "directory": dbus.Boolean(self.directory),
-                    "accept_label": dbus.String("Select"),
-                },
-                signature="sv",
-            )
-            returned = str(chooser.OpenFile("", self.title, options, timeout=15))
-            self.returned_path = returned
-            self.request_path = returned
-            pending = self.pending_responses.pop(returned, None)
-            self.pending_responses.clear()
-            if pending is not None and not self.done:
-                self.on_response(*pending)
-            if not self.done:
-                GLib.timeout_add_seconds(INTERACTION_TIMEOUT_SECONDS, self.on_timeout)
-                GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self.on_signal)
-                GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, self.on_signal)
-                self.loop.run()
-        except Exception as error:
-            self.finish(FAILED, error=f"could not open the attachment picker: {error}")
-        finally:
-            for match in self.matches:
-                try:
-                    match.remove()
-                except Exception:
-                    pass
-        if self.exit_code == SUCCESS:
-            sys.stdout.write(self.path + "\n")
-        elif self.exit_code == FAILED:
-            print(self.error or "attachment picker failed", file=sys.stderr)
-        return self.exit_code
+        code = int(status_path.read_text(encoding="ascii"))
+        if code == SUCCESS:
+            try:
+                selected = os.fsdecode((Path(directory) / "result").read_bytes())
+                print(canonical_path(selected, MODES[mode][1]))
+            except (OSError, ValueError) as error:
+                print(str(error), file=sys.stderr)
+                return FAILED
+        elif code == FAILED:
+            error_path = Path(directory) / "error"
+            message = error_path.read_text(encoding="utf-8") if error_path.exists() else "attachment picker failed"
+            print(message, file=sys.stderr)
+        return code
 
 
 def main(argv: list[str]) -> int:
+    if len(argv) == 4 and argv[1] == "--terminal-session" and argv[2] in MODES:
+        return terminal_session(argv[2], argv[3])
     if len(argv) != 2 or argv[1] not in MODES:
         print("usage: attachment-picker.py {share-file|share-folder|save-folder}", file=sys.stderr)
         return FAILED
-    return PortalPicker(argv[1]).run()
+    return run_picker(argv[1])
 
 
 if __name__ == "__main__":

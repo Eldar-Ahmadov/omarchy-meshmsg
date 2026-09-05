@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "eldar.meshmsg",
   "name": "Meshmsg Chat",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "author": "Eldar",
   "license": "MIT",
   "description": "Chat and share attachments over the local meshmsg peer-to-peer daemon from the Omarchy bar.",
@@ -20,9 +20,18 @@
     "defaultSection": "right",
     "defaults": {
       "refreshIntervalSec": 5,
-      "maxMessages": 100
+      "maxMessages": 100,
+      "dockSide": "right"
     },
     "schema": [
+      {
+        "key": "dockSide",
+        "type": "enum",
+        "label": "Panel position",
+        "options": ["left", "center", "right"],
+        "defaultValue": "right",
+        "description": "Where the open Meshmsg panel sits along the screen edge."
+      },
       {
         "key": "refreshIntervalSec",
         "type": "integer",

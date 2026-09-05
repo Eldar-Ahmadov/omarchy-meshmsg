@@ -101,6 +101,13 @@ Panel {
     : "DAEMON STOPPED"
   readonly property color connectionColor: mesh.running && mesh.topicJoined ? "#43a047"
     : mesh.running ? "#f9a825" : dim
+  readonly property string dockSide: normalizedDockSide(setting("dockSide", "right"))
+  readonly property var barWindow: button.QsWindow ? button.QsWindow.window : null
+  readonly property point buttonBarPosition: {
+    panelAnchorWatcher.transform
+    if (!barWindow || !barWindow.contentItem) return Qt.point(0, 0)
+    return button.mapToItem(barWindow.contentItem, 0, 0)
+  }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -472,6 +479,25 @@ Panel {
     Qt.callLater(function() { statusSurface.forceActiveFocus() })
   }
 
+  function normalizedDockSide(value) {
+    var side = String(value || "").toLowerCase()
+    return ["left", "center", "right"].indexOf(side) !== -1 ? side : "right"
+  }
+
+  function persistSettings(values) {
+    var entry = { id: root.moduleName }
+    for (var existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
+    for (var key in values) entry[key] = values[key]
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function moveDockSide(side) {
+    var value = normalizedDockSide(side)
+    if (value !== dockSide) persistSettings({ dockSide: value })
+  }
+
   function setSettingsSurface(open) {
     helpOpen = false
     settingsOpen = open
@@ -810,6 +836,46 @@ Panel {
     onActivated: root.showInviteQr()
   }
 
+  TransformWatcher {
+    id: panelAnchorWatcher
+    a: root.barWindow ? root.barWindow.contentItem : null
+    b: button
+  }
+
+  // A virtual anchor can move freely along the bar without moving or
+  // recreating the widget itself. KeyboardPanel follows it, so the open card
+  // glides between screen positions instead of disappearing during a bar
+  // layout reload.
+  Item {
+    id: panelAnchor
+    parent: button
+    width: 0
+    height: 0
+    x: {
+      if (panel.barPos === "left" || panel.barPos === "right") return 0
+      var center = root.dockSide === "left" ? panel.margin + panel.contentWidth / 2
+        : root.dockSide === "center" ? panel.screenW / 2
+        : panel.screenW - panel.margin - panel.contentWidth / 2
+      return center - root.buttonBarPosition.x
+    }
+    y: {
+      if (panel.barPos === "top" || panel.barPos === "bottom") return 0
+      var center = root.dockSide === "left" ? panel.margin + panel.contentHeight / 2
+        : root.dockSide === "center" ? panel.screenH / 2
+        : panel.screenH - panel.margin - panel.contentHeight / 2
+      return center - root.buttonBarPosition.y
+    }
+
+    Behavior on x {
+      enabled: root.opened
+      NumberAnimation { duration: 260; easing.type: Easing.InOutCubic }
+    }
+    Behavior on y {
+      enabled: root.opened
+      NumberAnimation { duration: 260; easing.type: Easing.InOutCubic }
+    }
+  }
+
   WidgetButton {
     id: button
     anchors.fill: parent
@@ -829,11 +895,11 @@ Panel {
 
   KeyboardPanel {
     id: panel
-    anchorItem: button
+    anchorItem: panelAnchor
     owner: root
     bar: root.bar
     open: root.opened
-    centerOnBar: true
+    centerOnBar: false
     // Focus is assigned by chatFocusTimer after the opening animation. Letting
     // KeyboardPanel focus the field immediately can create a stale blinking
     // cursor at the field's pre-layout position.
@@ -1629,6 +1695,36 @@ Panel {
         PanelSeparator {
           Layout.fillWidth: true
           foreground: root.foreground
+        }
+
+        RowLayout {
+          Layout.fillWidth: true
+          spacing: Style.space(12)
+
+          Text {
+            text: "PANEL POSITION"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+          }
+
+          Item { Layout.fillWidth: true }
+
+          ButtonGroup {
+            options: [
+              { value: "left", label: "Left" },
+              { value: "center", label: "Center" },
+              { value: "right", label: "Right" }
+            ]
+            value: root.dockSide
+            foreground: root.foreground
+            background: Color.background
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            onChanged: function(value) { root.moveDockSide(value) }
+          }
         }
 
         Rectangle {

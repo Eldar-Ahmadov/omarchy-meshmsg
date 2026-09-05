@@ -48,7 +48,7 @@ Panel {
   property string _pathCopyText: ""
   readonly property var spinnerFrames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   readonly property string spinnerFrame: spinnerFrames[spinnerIndex]
-  readonly property var displayedMessages: filterMessages(mesh.messages, searchQuery)
+  readonly property var displayedMessages: filterMessages(mesh.messages, searchQuery).slice().reverse()
   readonly property var displayedClipboard: filterClipboard(clipboardHistory, clipboardQuery)
   readonly property string clipboardHistoryPath: Quickshell.env("HOME") + "/.local/state/omarchy/clipboard-history.json"
   readonly property var helpTabs: [
@@ -102,6 +102,8 @@ Panel {
   readonly property color connectionColor: mesh.running && mesh.topicJoined ? "#43a047"
     : mesh.running ? "#f9a825" : dim
   readonly property string dockSide: normalizedDockSide(setting("dockSide", "right"))
+  readonly property int panelWidthSetting: normalizedPanelWidth(setting("panelWidthPercent", "50"))
+  property real panelWidthPercent: panelWidthSetting
   readonly property var barWindow: button.QsWindow ? button.QsWindow.window : null
   readonly property point buttonBarPosition: {
     panelAnchorWatcher.transform
@@ -112,10 +114,14 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  Behavior on panelWidthPercent {
+    NumberAnimation { duration: 260; easing.type: Easing.InOutCubic }
+  }
+
   function sendCurrent() {
     if (mesh.sendMessage(messageField.text)) {
       messageField.text = ""
-      Qt.callLater(scrollToBottom)
+      Qt.callLater(scrollToLatest)
     }
   }
 
@@ -126,10 +132,10 @@ Panel {
     }
   }
 
-  function scrollToBottom() {
+  function scrollToLatest() {
     if (messageList.count > 0) {
-      messageList.currentIndex = messageList.count - 1
-      messageList.positionViewAtEnd()
+      messageList.currentIndex = 0
+      messageList.positionViewAtBeginning()
     }
   }
 
@@ -484,6 +490,11 @@ Panel {
     return ["left", "center", "right"].indexOf(side) !== -1 ? side : "right"
   }
 
+  function normalizedPanelWidth(value) {
+    var width = parseInt(value, 10)
+    return [25, 40, 50].indexOf(width) !== -1 ? width : 50
+  }
+
   function persistSettings(values) {
     var entry = { id: root.moduleName }
     for (var existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
@@ -496,6 +507,11 @@ Panel {
   function moveDockSide(side) {
     var value = normalizedDockSide(side)
     if (value !== dockSide) persistSettings({ dockSide: value })
+  }
+
+  function setPanelWidth(value) {
+    var width = normalizedPanelWidth(value)
+    if (width !== panelWidthSetting) persistSettings({ panelWidthPercent: String(width) })
   }
 
   function setSettingsSurface(open) {
@@ -545,7 +561,7 @@ Panel {
     pointerCursorReady = false
     pointerCursorResetTimer.restart()
     mesh.refresh()
-    Qt.callLater(root.scrollToBottom)
+    Qt.callLater(root.scrollToLatest)
     // Wait for the panel's opening/layout transition before showing a text
     // cursor; focusing during that transition can leave a stale cursor quad.
     if (!pickerReturn && mesh.running) chatFocusTimer.restart()
@@ -617,7 +633,7 @@ Panel {
   Connections {
     target: mesh
     function onTimelineItemAdded() {
-      if (root.opened) Qt.callLater(root.scrollToBottom)
+      if (root.opened) Qt.callLater(root.scrollToLatest)
     }
     function onIncomingActivity() {
       if (!root.chatContentVisible()) root.unread += 1
@@ -904,7 +920,7 @@ Panel {
     // KeyboardPanel focus the field immediately can create a stale blinking
     // cursor at the field's pre-layout position.
     focusTarget: null
-    contentWidth: panel.fittedContentWidth(panel.screenW * 0.6)
+    contentWidth: panel.fittedContentWidth(panel.screenW * root.panelWidthPercent / 100)
     contentHeight: Math.max(1, Math.round(panel.availableCardHeight))
 
     ColumnLayout {
@@ -1697,33 +1713,68 @@ Panel {
           foreground: root.foreground
         }
 
-        RowLayout {
+        ColumnLayout {
           Layout.fillWidth: true
-          spacing: Style.space(12)
+          spacing: Style.space(8)
 
-          Text {
-            text: "PANEL POSITION"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
+          RowLayout {
+            Layout.fillWidth: true
+            spacing: Style.space(12)
+
+            Text {
+              text: "PANEL POSITION"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            Item { Layout.fillWidth: true }
+
+            ButtonGroup {
+              options: [
+                { value: "left", label: "Left" },
+                { value: "center", label: "Center" },
+                { value: "right", label: "Right" }
+              ]
+              value: root.dockSide
+              foreground: root.foreground
+              background: Color.background
+              accent: root.accent
+              fontFamily: root.fontFamily
+              fontSize: Style.font.caption
+              onChanged: function(value) { root.moveDockSide(value) }
+            }
           }
 
-          Item { Layout.fillWidth: true }
+          RowLayout {
+            Layout.fillWidth: true
+            spacing: Style.space(12)
 
-          ButtonGroup {
-            options: [
-              { value: "left", label: "Left" },
-              { value: "center", label: "Center" },
-              { value: "right", label: "Right" }
-            ]
-            value: root.dockSide
-            foreground: root.foreground
-            background: Color.background
-            accent: root.accent
-            fontFamily: root.fontFamily
-            fontSize: Style.font.caption
-            onChanged: function(value) { root.moveDockSide(value) }
+            Text {
+              text: "PANEL WIDTH"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            Item { Layout.fillWidth: true }
+
+            ButtonGroup {
+              options: [
+                { value: "25", label: "25%" },
+                { value: "40", label: "40%" },
+                { value: "50", label: "50%" }
+              ]
+              value: String(root.panelWidthSetting)
+              foreground: root.foreground
+              background: Color.background
+              accent: root.accent
+              fontFamily: root.fontFamily
+              fontSize: Style.font.caption
+              onChanged: function(value) { root.setPanelWidth(value) }
+            }
           }
         }
 

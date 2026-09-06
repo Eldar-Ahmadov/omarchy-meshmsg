@@ -366,20 +366,20 @@ Rectangle {
                     spacing: Style.space(3)
 
                     Text {
+                      Layout.alignment: Qt.AlignLeft
+                      text: Qt.formatTime(new Date(Number(modelData.timestampMs || 0)), "HH:mm")
+                      color: root.dim
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    Text {
                       Layout.fillWidth: true
                       text: String(modelData.body || modelData.text || "")
                       color: root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
                       wrapMode: Text.WrapAnywhere
-                    }
-
-                    Text {
-                      Layout.alignment: Qt.AlignRight
-                      text: Qt.formatTime(new Date(Number(modelData.timestampMs || 0)), "HH:mm")
-                      color: root.dim
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
                     }
                   }
                 }

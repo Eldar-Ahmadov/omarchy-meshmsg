@@ -20,6 +20,7 @@ Panel {
   property bool searchOpen: false
   property string searchQuery: ""
   property bool clipboardOpen: false
+  property bool privateOpen: false
   property bool helpOpen: false
   property int helpTab: 0
   property string clipboardQuery: ""
@@ -76,6 +77,13 @@ Panel {
       { key: "Ctrl+S", action: "Open the status surface" },
       { key: "↑ / ↓", action: "Move through clipboard entries" },
       { key: "Enter", action: "Broadcast the selected entry" }
+    ] },
+    { label: "PRIVATE", bindings: [
+      { key: "Esc", action: "Return to group chat or conversation list" },
+      { key: "Ctrl+D", action: "Toggle private messages / group chat" },
+      { key: "↑ / ↓", action: "Move through conversations" },
+      { key: "Enter", action: "Open a conversation or send text" },
+      { key: "Ctrl+K", action: "Open key bindings" }
     ] },
     { label: "PICKER", bindings: [
       { key: "Type", action: "Fuzzy-filter the current folder" },
@@ -183,12 +191,28 @@ Panel {
       helpOpen = false
       return
     }
-    helpTab = clipboardOpen ? 2 : settingsOpen ? 1 : 0
+    helpTab = privateOpen ? 3 : clipboardOpen ? 2 : settingsOpen ? 1 : 0
     helpOpen = true
   }
 
+  function setPrivateSurface(open) {
+    helpOpen = false
+    privateOpen = open
+    if (open) {
+      settingsOpen = false
+      clipboardOpen = false
+      searchOpen = false
+      searchQuery = ""
+      messageField.focus = false
+      Qt.callLater(function() { privateSurface.forceActiveFocus() })
+    } else {
+      privateSurface.focus = false
+      restoreChatFocus()
+    }
+  }
+
   function restoreChatFocus() {
-    if (!root.opened || root.settingsOpen || root.clipboardOpen || root.helpOpen || !mesh.running) return
+    if (!root.opened || root.settingsOpen || root.clipboardOpen || root.privateOpen || root.helpOpen || !mesh.running) return
     Qt.callLater(function() {
       if (root.searchOpen) searchField.forceActiveFocus()
       else messageField.forceActiveFocus()
@@ -304,7 +328,7 @@ Panel {
   }
 
   function chatContentVisible() {
-    return root.opened && !root.settingsOpen && !root.clipboardOpen && !root.helpOpen && !root.searchOpen
+    return root.opened && !root.settingsOpen && !root.clipboardOpen && !root.privateOpen && !root.helpOpen && !root.searchOpen
       && !attachmentPickerBusy
   }
 
@@ -412,6 +436,7 @@ Panel {
     if (open) {
       if (inviteQrOpen) closeInviteQr()
       settingsOpen = false
+      privateOpen = false
       searchOpen = false
       searchQuery = ""
       clipboardQuery = ""
@@ -519,6 +544,7 @@ Panel {
     settingsOpen = open
     if (open) {
       clipboardOpen = false
+      privateOpen = false
       searchOpen = false
       searchQuery = ""
       chatFocusTimer.stop()
@@ -537,6 +563,7 @@ Panel {
   onOpenedChanged: {
     if (!opened) {
       helpOpen = false
+      privateOpen = false
       pointerCursorReady = false
       pointerCursorResetTimer.stop()
       chatFocusTimer.stop()
@@ -549,11 +576,13 @@ Panel {
       _attachmentPickerReturning = false
       settingsOpen = false
       clipboardOpen = false
+      privateOpen = false
       searchOpen = _attachmentPickerReturnSearchOpen
       searchQuery = _attachmentPickerReturnSearchQuery
     } else {
       settingsOpen = false
       clipboardOpen = false
+      privateOpen = false
       searchOpen = false
       searchQuery = ""
     }
@@ -661,6 +690,11 @@ Panel {
       if (root.attachmentPickerBusy) return "busy"
       root.open(); root.setClipboardSurface(true); return "ok"
     }
+    function privateMessages(): string {
+      if (root.attachmentPickerBusy) return "busy"
+      root.open(); root.setPrivateSurface(true); return "ok"
+    }
+    function direct(): string { return privateMessages() }
     function copyInvite(): string { return mesh.copyInvite() ? "ok" : "unavailable" }
     function inviteQr(): string {
       if (root.attachmentPickerBusy) return "busy"
@@ -678,6 +712,7 @@ Panel {
     onActivated: {
       if (root.helpOpen) root.helpOpen = false
       else if (root.inviteQrOpen) root.closeInviteQr()
+      else if (root.privateOpen) root.setPrivateSurface(false)
       else if (root.clipboardOpen) root.setClipboardSurface(false)
       else if (root.searchOpen) root.closeSearch()
       else if (root.settingsOpen) root.setSettingsSurface(false)
@@ -718,6 +753,27 @@ Panel {
     context: Qt.ApplicationShortcut
     enabled: root.opened && root.helpOpen
     onActivated: root.helpTab = (root.helpTab + root.helpTabs.length - 1) % root.helpTabs.length
+  }
+
+  Shortcut {
+    sequence: "Ctrl+D"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened
+    onActivated: root.setPrivateSurface(!root.privateOpen)
+  }
+
+  Shortcut {
+    sequence: "Up"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && root.privateOpen && !root.helpOpen
+    onActivated: privateSurface.moveSelection(-1)
+  }
+
+  Shortcut {
+    sequence: "Down"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && root.privateOpen && !root.helpOpen
+    onActivated: privateSurface.moveSelection(1)
   }
 
   Shortcut {
@@ -805,7 +861,7 @@ Panel {
     id: chatFocusTimer
     interval: 240
     repeat: false
-    onTriggered: if (root.opened && !root.settingsOpen && !root.clipboardOpen && !root.helpOpen && mesh.running) messageField.forceActiveFocus()
+    onTriggered: if (root.opened && !root.settingsOpen && !root.clipboardOpen && !root.privateOpen && !root.helpOpen && mesh.running) messageField.forceActiveFocus()
   }
 
   Timer {
@@ -937,7 +993,7 @@ Panel {
         cursorShape: Qt.ArrowCursor
       }
       spacing: Style.space(12)
-      visible: (!root.settingsOpen && !root.clipboardOpen) || chatRotation.angle > -89.9
+      visible: (!root.settingsOpen && !root.clipboardOpen && !root.privateOpen) || chatRotation.angle > -89.9
       opacity: 1.0 - Math.abs(chatRotation.angle) / 90.0
 
       transform: Rotation {
@@ -945,7 +1001,7 @@ Panel {
         origin.x: content.width / 2
         origin.y: content.height / 2
         axis { x: 0; y: 1; z: 0 }
-        angle: root.settingsOpen || root.clipboardOpen ? -90 : 0
+        angle: root.settingsOpen || root.clipboardOpen || root.privateOpen ? -90 : 0
         Behavior on angle {
           NumberAnimation { duration: 220; easing.type: Easing.InOutQuad }
         }
@@ -982,6 +1038,15 @@ Panel {
               font.bold: true
             }
           }
+        }
+
+        PanelActionButton {
+          visible: mesh.installed && mesh.running
+          iconText: mesh.privateUnreadCount > 0 ? "󰭹 " + Math.min(mesh.privateUnreadCount, 99) : "󰭹"
+          tooltipText: mesh.privateUnreadCount > 0 ? mesh.privateUnreadCount + " unread private message" + (mesh.privateUnreadCount === 1 ? "" : "s") : "Private messages (Ctrl+D)"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: root.setPrivateSurface(true)
         }
 
         PanelActionButton {
@@ -2241,6 +2306,24 @@ Panel {
           }
         }
       }
+    }
+
+    PrivateMessaging {
+      id: privateSurface
+      anchors.fill: parent
+      z: 30
+      visible: root.privateOpen
+      active: root.privateOpen
+      compact: root.panelWidthPercent === 25
+      service: mesh
+      foreground: root.foreground
+      dim: root.dim
+      accent: root.accent
+      urgent: root.urgent
+      subtle: root.subtle
+      fontFamily: root.fontFamily
+      onCloseRequested: root.setPrivateSurface(false)
+      onHelpRequested: root.toggleHelp()
     }
 
     Rectangle {

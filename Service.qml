@@ -20,6 +20,14 @@ Item {
   property string peer: ""
   property string topic: ""
   property string localEndpoint: ""
+  property string alias: ""
+  property bool aliasEnabled: false
+  property string capturedHostname: ""
+  property string customAlias: ""
+  property int advertisedAliases: 0
+  property var ipcCapabilities: []
+  readonly property bool privateSendAvailable: ipcCapabilities.indexOf("private_send_v1") !== -1
+  readonly property bool peerDirectoryAvailable: ipcCapabilities.indexOf("peer_directory_v1") !== -1
   property double statusUpdatedAt: 0
   readonly property string stateDir: {
     var configured = Quickshell.env("MESHMSG_STATE_DIR")
@@ -32,6 +40,17 @@ Item {
   property string lastError: ""
   property string actionStatus: ""
   property var messages: []
+  // Private state intentionally lives outside the broadcast/attachment timeline.
+  // Conversation objects are { peer, messages, unreadCount, lastTimestampMs }.
+  property var privateMessages: []
+  property var conversations: []
+  property var knownPeers: []
+  readonly property int privateUnreadCount: {
+    var count = 0
+    for (var i = 0; i < conversations.length; i++) count += Number(conversations[i].unreadCount || 0)
+    return count
+  }
+  property bool privateSending: false
   property bool starting: false
   property bool stopping: false
   property bool joining: false
@@ -43,6 +62,7 @@ Item {
 
   signal incomingActivity()
   signal timelineItemAdded()
+  signal privateMessageAccepted(string requestedRecipient, string canonicalPeer)
 
   property int _nextTimelineId: 1
   property var _attachmentOffers: ({})
@@ -57,8 +77,14 @@ Item {
   property string _joinToken: ""
   property string _inviteToken: ""
   property string _sendBody: ""
+  property string _privateSendBody: ""
+  property string _privateSendRecipient: ""
+  property string _privateSendOutput: ""
+  property string _privateSendError: ""
   property string _statusOutput: ""
   property string _statusError: ""
+  property string _peersOutput: ""
+  property string _peersError: ""
   property string _sendOutput: ""
   property string _sendError: ""
   property string _joinOutput: ""
@@ -70,7 +96,10 @@ Item {
 
   readonly property int refreshIntervalSec: boundedInt("refreshIntervalSec", 5, 2, 60)
   readonly property int maxMessages: boundedInt("maxMessages", 100, 20, 500)
-  readonly property bool busy: starting || stopping || joining || sending || attachmentBusy
+  readonly property bool busy: starting || stopping || joining || sending || privateSending || attachmentBusy
+  readonly property int maxPrivateMessages: boundedInt("maxPrivateMessages", maxMessages, 20, 500)
+  readonly property int maxConversations: boundedInt("maxConversations", 50, 5, 200)
+  readonly property int maxKnownPeers: boundedInt("maxKnownPeers", 100, 10, 500)
   readonly property double maxAttachmentBytes: 1024 * 1024 * 1024
 
   function boundedInt(name, fallback, minimum, maximum) {
@@ -267,6 +296,7 @@ Item {
     endpointOnline = false
     topicJoined = false
     neighbors = 0
+    ipcCapabilities = []
     statusText = message || "Daemon stopped"
     if (listenProcess.running) listenProcess.running = false
   }
@@ -286,12 +316,19 @@ Item {
       peer = String(value.peer || "")
       topic = String(value.topic || "")
       localEndpoint = String(value.local_endpoint || value.socket || "")
+      alias = String(value.alias || "")
+      aliasEnabled = value.alias_enabled === true
+      capturedHostname = String(value.captured_hostname || "")
+      customAlias = value.custom_alias === null || value.custom_alias === undefined ? "" : String(value.custom_alias)
+      advertisedAliases = Math.max(0, Number(value.advertised_aliases || 0))
+      ipcCapabilities = Array.isArray(value.ipc_capabilities) ? value.ipc_capabilities.map(function(capability) { return String(capability) }) : []
       statusUpdatedAt = Date.now()
       statusText = !endpointOnline ? "Connecting…" : (!topicJoined ? "Waiting for peers" : "Connected")
       lastError = ""
       starting = false
       stopping = false
       if (running && !listenProcess.running && !listenRestart.running) startListening()
+      if (running && peerDirectoryAvailable) refreshPeers()
     } catch (error) {
       setUnavailable("Status error")
       lastError = "Could not parse meshmsg status"
@@ -302,6 +339,56 @@ Item {
     if (!installed || !running || listenProcess.running) return
     listenProcess.command = [binaryPath, "--json", "listen"]
     listenProcess.running = true
+  }
+
+  function refreshPeers() {
+    if (!installed || !running || !peerDirectoryAvailable || peersProcess.running) return false
+    _peersOutput = ""
+    _peersError = ""
+    peersProcess.command = [binaryPath, "--json", "peers"]
+    peersProcess.running = true
+    return true
+  }
+
+  function directoryPeer(raw, expired) {
+    if (!raw || typeof raw !== "object") return null
+    var key = String(raw.public_key || "")
+    var seen = Number(raw.last_seen_ms), expires = Number(raw.expires_at_ms)
+    if (!canonicalPeer(key) || key === peer || (raw.alias !== null && raw.alias !== undefined && typeof raw.alias !== "string")
+        || typeof raw.online !== "boolean" || !isFinite(seen) || seen < 0 || !isFinite(expires) || expires < seen) return null
+    return { peer: key, publicKey: key, alias: raw.alias === null || raw.alias === undefined ? "" : String(raw.alias),
+      online: expired === true ? false : raw.online, lastSeenMs: seen, expiresAtMs: expires }
+  }
+
+  function applyPeersSnapshot(event) {
+    if (Number(event.schema_version) !== 1 || !Array.isArray(event.peers) || !event.self || typeof event.self !== "object") return false
+    if (!canonicalPeer(event.self.public_key) || typeof event.self.online !== "boolean"
+        || (event.self.alias !== null && event.self.alias !== undefined && typeof event.self.alias !== "string")) return false
+    var next = [], seen = {}
+    for (var i = 0; i < event.peers.length; i++) {
+      var item = directoryPeer(event.peers[i], false)
+      if (!item || seen[item.peer]) return false
+      seen[item.peer] = true
+      next.push(item)
+    }
+    if (next.length > maxKnownPeers) next = next.slice(0, maxKnownPeers)
+    knownPeers = next
+    return true
+  }
+
+  function applyPeerLifecycle(event, expired) {
+    if (Number(event.schema_version) !== 1) return false
+    var item = directoryPeer(event.peer, expired)
+    if (!item) return false
+    var next = [], replaced = false
+    for (var i = 0; i < knownPeers.length; i++) {
+      if (String(knownPeers[i].peer || "") === item.peer) { replaced = true; if (!expired) next.push(item) }
+      else next.push(knownPeers[i])
+    }
+    if (!replaced && !expired) next.push(item)
+    while (next.length > maxKnownPeers) next.pop()
+    knownPeers = next
+    return true
   }
 
   function handleEvent(line, source) {
@@ -321,6 +408,14 @@ Item {
           outgoing: type === "queued"
         })
         if (type === "message") incomingActivity()
+      } else if (type === "private_message") {
+        handlePrivateMessage(event)
+      } else if (type === "peers_snapshot") {
+        applyPeersSnapshot(event)
+      } else if (type === "peer_discovered" || type === "peer_updated") {
+        applyPeerLifecycle(event, false)
+      } else if (type === "peer_expired") {
+        applyPeerLifecycle(event, true)
       } else if (type === "attachment_offer") {
         upsertAttachment(event, "incoming", false)
       } else if (type === "attachment_shared") {
@@ -369,14 +464,110 @@ Item {
           forgetOffer(completedTimelineId)
         }
       } else if (type === "peer_up" || type === "peer_down") {
+        if (type === "peer_up") rememberPeer(event.peer, Date.now())
         refreshSoon.restart()
       } else if (type === "lagged" || type === "error") {
         lastError = cleanError(event.message, type === "lagged" ? "Some messages were missed" : "Meshmsg event error")
+        if (type === "lagged") refreshPeers()
       }
     } catch (error) {
       // Never log the raw line: malformed attachment events may contain a reusable capability.
       console.warn("meshmsg: ignored invalid event")
     }
+  }
+
+  function utf8Bytes(value) {
+    return unescape(encodeURIComponent(String(value || ""))).length
+  }
+
+  function canonicalPeer(value) {
+    return /^[0-9a-f]{64}$/.test(String(value || ""))
+  }
+
+  function rememberPeer(value, timestamp) {
+    var id = String(value || "")
+    if (!canonicalPeer(id) || id === peer) return
+    var next = [], found = false
+    for (var i = 0; i < knownPeers.length; i++) {
+      var entry = knownPeers[i] || {}
+      if (String(entry.peer || "") === id) {
+        var copy = {}
+        for (var field in entry) copy[field] = entry[field]
+        copy.peer = id
+        copy.publicKey = String(copy.publicKey || id)
+        copy.lastSeenMs = Math.max(Number(entry.lastSeenMs || 0), Number(timestamp || Date.now()))
+        next.push(copy)
+        found = true
+      } else next.push(entry)
+    }
+    if (!found) next.push({ peer: id, publicKey: id, alias: "", online: false, lastSeenMs: Number(timestamp || Date.now()), expiresAtMs: 0 })
+    next.sort(function(a, b) { return Number(b.lastSeenMs) - Number(a.lastSeenMs) })
+    while (next.length > maxKnownPeers) next.pop()
+    knownPeers = next
+  }
+
+  function rebuildConversations(incomingPeer) {
+    var oldUnread = {}
+    for (var i = 0; i < conversations.length; i++) oldUnread[String(conversations[i].peer)] = Number(conversations[i].unreadCount || 0)
+    var grouped = {}
+    for (i = 0; i < privateMessages.length; i++) {
+      var item = privateMessages[i]
+      var other = item.outgoing ? String(item.to) : String(item.from)
+      if (!grouped[other]) grouped[other] = []
+      grouped[other].push(item)
+    }
+    var next = []
+    for (var key in grouped) {
+      var items = grouped[key]
+      var unread = Number(oldUnread[key] || 0)
+      if (incomingPeer === key) unread++
+      next.push({ peer: key, messages: items, unreadCount: unread, lastTimestampMs: Number(items[items.length - 1].timestampMs || 0) })
+    }
+    next.sort(function(a, b) { return b.lastTimestampMs - a.lastTimestampMs })
+    while (next.length > maxConversations) next.pop()
+    conversations = next
+  }
+
+  function appendPrivateMessage(item, incoming) {
+    var next = privateMessages.slice(0)
+    next.push(item)
+    while (next.length > maxPrivateMessages) next.shift()
+    privateMessages = next
+    var other = incoming ? String(item.from) : String(item.to)
+    rememberPeer(other, item.timestampMs)
+    rebuildConversations(incoming ? other : "")
+    timelineItemAdded()
+    if (incoming) incomingActivity()
+  }
+
+  function handlePrivateMessage(event) {
+    var from = String(event.from || ""), id = String(event.message_id || "")
+    var timestamp = Number(event.timestamp_ms), body = event.body
+    if (Number(event.schema_version) !== 1 || event.private !== true || !canonicalPeer(from)
+        || !/^[0-9a-f]{32}$/.test(id) || typeof body !== "string"
+        || !isFinite(timestamp) || timestamp <= 0 || event.acceptance_acknowledged !== true
+        || event.durable !== false || event.read !== false) return false
+    for (var i = 0; i < privateMessages.length; i++) {
+      if (!privateMessages[i].outgoing && privateMessages[i].from === from && privateMessages[i].messageId === id) return false
+    }
+    appendPrivateMessage({ id: "private:incoming:" + from + ":" + id, itemKind: "text", private: true,
+      outgoing: false, from: from, to: peer, body: body, messageId: id, timestampMs: timestamp,
+      acceptanceAcknowledged: true, durable: false, read: false }, true)
+    return true
+  }
+
+  function markConversationRead(value) {
+    var id = String(value || ""), next = [], changed = false
+    for (var i = 0; i < conversations.length; i++) {
+      var conversation = conversations[i]
+      if (String(conversation.peer) === id && Number(conversation.unreadCount || 0) !== 0) {
+        next.push({ peer: conversation.peer, messages: conversation.messages, unreadCount: 0,
+          lastTimestampMs: conversation.lastTimestampMs })
+        changed = true
+      } else next.push(conversation)
+    }
+    if (changed) conversations = next
+    return changed
   }
 
   function appendMessage(message) {
@@ -412,6 +603,22 @@ Item {
     sendProcess.stdinEnabled = true
     sendProcess.command = [binaryPath, "--json", "send", "--message-stdin"]
     sendProcess.running = true
+    return true
+  }
+
+  function sendPrivateMessage(recipient, body) {
+    var to = String(recipient || "").trim()
+    var text = String(body || "").trim()
+    if (!running || privateSending || sending || !privateSendAvailable || to === "" || text === "") return false
+    // Recipient is passed only to --to; the body is always delivered over stdin.
+    _privateSendRecipient = to
+    _privateSendBody = text
+    _privateSendOutput = ""
+    _privateSendError = ""
+    privateSending = true
+    privateSendProcess.stdinEnabled = true
+    privateSendProcess.command = [binaryPath, "--json", "send", "--to", to, "--message-stdin"]
+    privateSendProcess.running = true
     return true
   }
 
@@ -593,6 +800,11 @@ Item {
     _attachmentOffers = ({})
   }
 
+  function clearPrivateMessages() {
+    privateMessages = []
+    conversations = []
+  }
+
   Component.onCompleted: root.refreshAll()
 
   Timer {
@@ -673,6 +885,21 @@ Item {
   }
 
   Process {
+    id: peersProcess
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root._peersOutput = text }
+    stderr: StdioCollector { waitForEnd: true; onStreamFinished: root._peersError = text }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) return
+      try {
+        var value = JSON.parse(String(root._peersOutput || "").trim())
+        if (value.type !== "peers_snapshot" || !root.applyPeersSnapshot(value)) throw new Error("invalid snapshot")
+      } catch (error) {
+        root.lastError = "Could not parse meshmsg peer directory"
+      }
+    }
+  }
+
+  Process {
     id: listenProcess
     stdout: SplitParser { onRead: function(line) { root.handleEvent(line, "listener") } }
     stderr: SplitParser {
@@ -702,6 +929,53 @@ Item {
       root.sending = false
       if (exitCode !== 0) root.lastError = root.cleanError(root._sendError || root._sendOutput, "Could not send message")
       else root.lastError = ""
+    }
+  }
+
+  Process {
+    id: privateSendProcess
+    stdinEnabled: true
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root._privateSendOutput = text }
+    stderr: StdioCollector { waitForEnd: true; onStreamFinished: root._privateSendError = text }
+    onStarted: {
+      write(root._privateSendBody)
+      stdinEnabled = false
+    }
+    onExited: function(exitCode) {
+      stdinEnabled = true
+      var body = root._privateSendBody
+      var requested = root._privateSendRecipient
+      root._privateSendBody = ""
+      root._privateSendRecipient = ""
+      root.privateSending = false
+      if (exitCode !== 0) {
+        root.lastError = root.cleanError(root._privateSendError || root._privateSendOutput, "Could not send private message")
+        return
+      }
+      try {
+        var value = JSON.parse(String(root._privateSendOutput || "").trim())
+        var keys = Object.keys(value).sort().join(",")
+        var expected = "acceptance_acknowledged,body_bytes,durable,message_id,read,schema_version,timestamp_ms,to,type"
+        var timestamp = Number(value.timestamp_ms)
+        if (keys !== expected || value.type !== "private_accepted" || typeof value.schema_version !== "number" || value.schema_version !== 1
+            || typeof value.to !== "string" || !root.canonicalPeer(value.to) || (root.canonicalPeer(requested) && value.to !== requested)
+            || typeof value.message_id !== "string" || !/^[0-9a-f]{32}$/.test(value.message_id)
+            || typeof value.timestamp_ms !== "number" || !isFinite(timestamp) || timestamp <= 0 || Math.floor(timestamp) !== timestamp
+            || typeof value.body_bytes !== "number" || value.body_bytes !== root.utf8Bytes(body) || Math.floor(value.body_bytes) !== value.body_bytes
+            || value.acceptance_acknowledged !== true
+            || value.durable !== false || value.read !== false) throw new Error("invalid acceptance")
+        root.appendPrivateMessage({ id: "private:outgoing:" + value.to + ":" + value.message_id,
+          itemKind: "text", private: true, outgoing: true, from: root.peer, to: value.to,
+          requestedRecipient: requested, body: body, messageId: value.message_id, timestampMs: timestamp,
+          acceptanceAcknowledged: true, durable: false, read: false }, false)
+        root.privateMessageAccepted(requested, value.to)
+        root.lastError = ""
+      } catch (error) {
+        // A malformed success is never converted into a broadcast retry.
+        root.lastError = "Could not validate private-send acceptance"
+      }
+      root._privateSendOutput = ""
+      root._privateSendError = ""
     }
   }
 
@@ -865,6 +1139,8 @@ Item {
         root.lastError = root.cleanError(root._joinError || root._joinOutput, "Could not join chat")
       } else {
         root.messages = []
+        root.clearPrivateMessages()
+        root.knownPeers = []
         root.lastError = ""
         root.actionStatus = "Chat joined"
         actionClear.restart()

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "eldar.meshmsg",
   "name": "Meshmsg Chat",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "author": "Eldar",
   "license": "MIT",
   "description": "Chat and share attachments over the local meshmsg peer-to-peer daemon from the Omarchy bar.",
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "Meshmsg Chat",
-    "description": "Read and send messages, share attachments, manage the daemon, and join an existing chat.",
+    "description": "Read group and private messages, share group attachments, manage the daemon, and join an existing chat.",
     "category": "Network",
     "aliases": ["meshmsg", "chat", "mesh"],
     "allowMultiple": false,
@@ -21,6 +21,8 @@
     "defaults": {
       "refreshIntervalSec": 5,
       "maxMessages": 100,
+      "maxPrivateMessages": 100,
+      "maxConversations": 50,
       "dockSide": "right",
       "panelWidthPercent": "50"
     },
@@ -58,6 +60,24 @@
         "max": 500,
         "step": 20,
         "defaultValue": 100
+      },
+      {
+        "key": "maxPrivateMessages",
+        "type": "integer",
+        "label": "Private messages kept in memory",
+        "min": 20,
+        "max": 500,
+        "step": 20,
+        "defaultValue": 100
+      },
+      {
+        "key": "maxConversations",
+        "type": "integer",
+        "label": "Private conversations kept in memory",
+        "min": 5,
+        "max": 200,
+        "step": 5,
+        "defaultValue": 50
       }
     ]
   }

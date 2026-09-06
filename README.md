@@ -7,7 +7,8 @@ An Omarchy bar widget and chat panel backed by the local [`meshmsg`](https://git
 - live status and peer count
 - animated status surface with daemon, endpoint, topic, invite, bootstrap, identity, and IPC details
 - smoothly animated left, center, or right panel placement and 25%, 40%, or 50% screen-width sizing from the status/settings surface
-- keyboard shortcuts: `Ctrl+O` picks a file, `Ctrl+Shift+O` picks a folder, `Ctrl+Shift+V` toggles clipboard/chat, `Ctrl+S` toggles settings/chat, `C` copies the invite, and `Q` opens its QR code
+- keyboard shortcuts: `Ctrl+D` toggles private/group chat, `Ctrl+O` picks a file, `Ctrl+Shift+O` picks a folder, `Ctrl+Shift+V` toggles clipboard/chat, `Ctrl+S` toggles settings/chat, `C` copies the invite, and `Q` opens its QR code
+- a separate peer-list/private-chat surface with authoritative peer discovery on meshmsg v0.1.14+, alias-focused peer rows with shortened node IDs, alias or canonical-node-ID addressing, and a compact 25% drill-in layout
 - latest-first incoming and outgoing chat messages with hover actions to copy or delete individual messages
 - explicit file and folder-snapshot sharing with inline transfer cards and progress
 - collision-safe downloads to the XDG Downloads directory, with optional destination selection
@@ -19,6 +20,8 @@ An Omarchy bar widget and chat panel backed by the local [`meshmsg`](https://git
 - copy the stored invite or display it as a scannable QR code
 - bounded in-memory message and attachment history (not persisted by the plugin)
 
+Private messaging is text-only in the panel: it has no attachment controls and does not claim trust, delivery, or read receipts. It is shown as unavailable, without affecting group chat, when the daemon does not advertise the `private_send_v1` IPC capability. On meshmsg v0.1.14+, the peer list follows the authoritative peer directory and distinguishes online and expired/offline entries. New conversations can be addressed with a unique online alias or a canonical node ID; meshmsg resolves aliases, while canonical keys remain the conversation identity. Advertised aliases are explicitly untrusted display labels.
+
 The plugin uses meshmsg's current equal-peer command family, including `share` and `download --offer-stdin`. Attachment offers and transfer state remain in memory, so restarting the shell can discard undownloaded offers and in-progress UI state even though daemon-pinned blob data persists.
 
 Starting the daemon installs and enables a persistent systemd user unit at `~/.config/systemd/user/meshmsg.service`. The unit starts again after reboot when the user session starts and resolves the supported meshmsg binary on every launch, so binary upgrades do not leave a stale `ExecStart` path. An existing user-managed persistent `meshmsg.service` is respected and never overwritten.
@@ -29,7 +32,7 @@ Meshmsg is currently a trusted **plaintext** swarm. Anyone with an invite can re
 
 ## Requirements
 
-- meshmsg v0.1.9 or newer, preferably installed at `~/.local/bin/meshmsg`
+- meshmsg v0.1.9 or newer (v0.1.14+ is required for UI peer discovery, and `private_send_v1` is required for private messages), preferably installed at `~/.local/bin/meshmsg`
 - Python, `fd`, `fzf`, and `xdg-terminal-exec` for the terminal attachment picker
 - a systemd user session
 - initialized or joined meshmsg state before starting, or an invite entered in the panel

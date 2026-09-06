@@ -17,11 +17,9 @@ Rectangle {
   property bool active: false
   property bool compact: false
   property bool detailOpen: false
-  property bool creating: false
   property int selectedIndex: -1
-  property string peerQuery: ""
-  property string draftPeerKey: ""
-  property string draftAlias: ""
+  property bool searchOpen: false
+  property string messageQuery: ""
 
   signal closeRequested()
   signal helpRequested()
@@ -35,12 +33,13 @@ Rectangle {
   readonly property bool directoryAvailable: value("peerDirectoryAvailable", false) === true
   readonly property var knownPeers: value("knownPeers", []) || []
   readonly property var allPeers: buildPeerRows()
-  readonly property var peers: filterPeerRows(allPeers, peerQuery)
+  readonly property var peers: allPeers
   readonly property var selected: selectedIndex >= 0 && selectedIndex < peers.length ? peers[selectedIndex] : null
-  readonly property string selectedKey: String(selected && (selected.peerKey || selected.peer || selected.key) || draftPeerKey)
+  readonly property string selectedKey: String(selected && (selected.peerKey || selected.peer || selected.key) || "")
   readonly property bool hasSelection: selectedKey !== ""
   readonly property bool selectedOnline: !selected || !selected._discovered || selected.online === true
-  readonly property var selectedMessages: selected && (selected.messages || selected.timeline) || []
+  readonly property var conversationMessages: selected && (selected.messages || selected.timeline) || []
+  readonly property var selectedMessages: filterMessages(conversationMessages, messageQuery)
 
   function value(name, fallback) {
     var candidate = service ? service[name] : undefined
@@ -88,22 +87,23 @@ Rectangle {
       target._discovered = true
     }
     rows.sort(function(a, b) {
-      if (a.online === true && b.online !== true) return -1
-      if (b.online === true && a.online !== true) return 1
-      return Number(b.lastSeenMs || b.lastTimestampMs || 0) - Number(a.lastSeenMs || a.lastTimestampMs || 0)
+      var leftAlias = String(a.alias || a.label || a.name || "").toLowerCase()
+      var rightAlias = String(b.alias || b.label || b.name || "").toLowerCase()
+      if (leftAlias !== rightAlias) return leftAlias < rightAlias ? -1 : 1
+      var leftKey = keyOf(a)
+      var rightKey = keyOf(b)
+      return leftKey < rightKey ? -1 : (leftKey > rightKey ? 1 : 0)
     })
     return rows
   }
 
-  function filterPeerRows(values, query) {
+  function filterMessages(values, query) {
     var needle = String(query || "").trim().toLowerCase()
     if (needle === "") return values
     var result = []
     for (var i = 0; i < values.length; i++) {
       var item = values[i] || {}
-      var key = String(item.peerKey || item.peer || item.key || "")
-      var alias = String(item.alias || item.label || item.name || "")
-      if ((alias + " " + key).toLowerCase().indexOf(needle) !== -1) result.push(item)
+      if (String(item.body || item.text || "").toLowerCase().indexOf(needle) !== -1) result.push(item)
     }
     return result
   }
@@ -114,22 +114,13 @@ Rectangle {
     return alias !== "" ? alias : "Unnamed node"
   }
 
-  function canonicalPeer(value) {
-    return /^[0-9a-f]{64}$/.test(String(value || ""))
-  }
-
-  function shortKey(key) {
-    var text = String(key || "")
-    return text.length > 18 ? text.substring(0, 10) + "…" + text.substring(text.length - 6) : text
-  }
-
   function selectConversation(index) {
     if (index < 0 || index >= peers.length) return
     var candidate = peers[index]
     if (candidate._discovered && candidate.online !== true && !candidate._hasConversation) return
     selectedIndex = index
-    draftPeerKey = ""
-    draftAlias = ""
+    searchOpen = false
+    messageQuery = ""
     detailOpen = true
     var key = String(peers[index].peerKey || peers[index].peer || peers[index].key || "")
     invoke("selectPrivateConversation", [key])
@@ -142,54 +133,30 @@ Rectangle {
     selectConversation(Math.max(0, Math.min(peers.length - 1, (selectedIndex < 0 ? 0 : selectedIndex + delta))))
   }
 
-  function submitPeer() {
-    var recipient = recipientField.text.trim()
-    if (recipient === "") return
-    selectedIndex = -1
-    draftPeerKey = recipient
-    draftAlias = canonicalPeer(recipient) ? "" : recipient
-    detailOpen = true
-    recipientField.text = ""
-    creating = false
-    Qt.callLater(function() { composer.forceActiveFocus() })
-  }
-
-  function acceptResolvedRecipient(requested, canonical) {
-    if (draftPeerKey !== String(requested || "")) return
-    draftPeerKey = String(canonical || "")
-    Qt.callLater(function() {
-      for (var i = 0; i < root.peers.length; i++) {
-        var item = root.peers[i] || {}
-        var key = String(item.peerKey || item.peer || item.key || "")
-        if (key === root.draftPeerKey) {
-          root.selectedIndex = i
-          root.draftPeerKey = ""
-          root.draftAlias = ""
-          root.invoke("selectPrivateConversation", [key])
-          root.invoke("markConversationRead", [key])
-          break
-        }
-      }
-    })
-  }
-
   function sendCurrent() {
     var body = composer.text.trim()
     if (selectedKey === "" || body === "" || !selectedOnline) return
     if (invoke("sendPrivateMessage", [selectedKey, body]) !== false) composer.text = ""
   }
 
-  function goBack() {
-    if (creating) creating = false
-    else if (compact && detailOpen) detailOpen = false
-    else closeRequested()
+  function setSearchOpen(open) {
+    searchOpen = open && hasSelection
+    if (searchOpen) Qt.callLater(function() { messageSearchField.forceActiveFocus() })
+    else {
+      messageQuery = ""
+      messageSearchField.focus = false
+      if (hasSelection) Qt.callLater(function() { composer.forceActiveFocus() })
+    }
   }
 
-  Connections {
-    target: root.service
-    function onPrivateMessageAccepted(requestedRecipient, canonicalPeer) {
-      root.acceptResolvedRecipient(requestedRecipient, canonicalPeer)
-    }
+  function toggleSearch() {
+    setSearchOpen(!searchOpen)
+  }
+
+  function goBack() {
+    if (searchOpen) setSearchOpen(false)
+    else if (compact && detailOpen) detailOpen = false
+    else closeRequested()
   }
 
   ColumnLayout {
@@ -211,11 +178,6 @@ Rectangle {
         spacing: 0
         Text { text: "PRIVATE MESSAGES"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.heading; font.bold: true }
         Text { text: root.compact ? (root.detailOpen && root.selected ? root.peerLabel(root.selected) : "CONVERSATIONS") : "PEERS · DIRECT TEXT"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
-      }
-      Button {
-        visible: root.capable && (!root.compact || !root.detailOpen)
-        text: root.creating ? "Cancel" : "New message"
-        onClicked: root.creating = !root.creating
       }
     }
 
@@ -244,24 +206,7 @@ Rectangle {
       spacing: Style.space(8)
 
       Rectangle {
-        visible: root.creating && (!root.compact || !root.detailOpen)
-        Layout.fillWidth: true
-        implicitHeight: newForm.implicitHeight + Style.space(20)
-        color: root.subtle
-        radius: Style.cornerRadius
-        ColumnLayout {
-          id: newForm
-          anchors.fill: parent
-          anchors.margins: Style.space(10)
-          Text { text: "NEW MESSAGE"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
-          TextField { id: recipientField; Layout.fillWidth: true; placeholderText: "Peer alias or canonical node ID"; font.family: root.fontFamily; onAccepted: root.submitPeer() }
-          Text { Layout.fillWidth: true; text: "Aliases are resolved by meshmsg and must uniquely identify an online peer. The resolved canonical node ID remains the conversation identity."; wrapMode: Text.WordWrap; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-          Button { Layout.alignment: Qt.AlignRight; text: "Open"; enabled: recipientField.text.trim() !== ""; onClicked: root.submitPeer() }
-        }
-      }
-
-      Rectangle {
-        visible: !root.compact || !root.detailOpen
+        visible: root.searchOpen && (!root.compact || root.detailOpen)
         Layout.fillWidth: true
         implicitHeight: Style.space(44)
         radius: 0
@@ -283,27 +228,27 @@ Rectangle {
           }
 
           TextField {
-            id: peerSearchField
+            id: messageSearchField
             Layout.fillWidth: true
-            placeholderText: "Search peers"
-            text: root.peerQuery
+            placeholderText: root.hasSelection ? "Search direct messages" : "Select a node to search messages"
+            text: root.messageQuery
+            enabled: root.hasSelection
             font.family: root.fontFamily
-            cursorVisible: activeFocus && root.active && (!root.compact || !root.detailOpen)
+            cursorVisible: activeFocus && root.active && root.hasSelection && (!root.compact || root.detailOpen)
             cursorDelegate: Rectangle {
               width: 2
               color: root.foreground
-              visible: peerSearchField.cursorVisible
+              visible: messageSearchField.cursorVisible
             }
             background: Item {}
             onTextChanged: {
-              root.peerQuery = text
-              root.selectedIndex = -1
-              if (peerList.count > 0) peerList.positionViewAtIndex(0, ListView.Beginning)
+              root.messageQuery = text
+              if (privateMessageList.count > 0) privateMessageList.positionViewAtIndex(0, ListView.Beginning)
             }
           }
 
           Text {
-            text: peerList.count + " peer" + (peerList.count === 1 ? "" : "s")
+            text: root.selectedMessages.length + " result" + (root.selectedMessages.length === 1 ? "" : "s")
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -327,7 +272,7 @@ Rectangle {
             anchors.centerIn: parent
             width: parent.width - Style.space(24)
             visible: root.peers.length === 0
-            text: root.peerQuery !== "" ? "No matches" : "No peers"
+            text: "No peers"
             horizontalAlignment: Text.AlignHCenter
             color: root.dim
             font.family: root.fontFamily
@@ -369,15 +314,6 @@ Rectangle {
                   font.bold: true
                   elide: Text.ElideRight
                 }
-
-                Text {
-                  width: parent.width
-                  text: root.shortKey(modelData.publicKey || modelData.peerKey || modelData.peer || modelData.key)
-                  color: root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideMiddle
-                }
               }
 
               MouseArea {
@@ -406,35 +342,64 @@ Rectangle {
             anchors.fill: parent
             anchors.margins: Style.space(10)
             spacing: Style.space(7)
-            RowLayout {
-              visible: root.hasSelection
-              Layout.fillWidth: true
-              ColumnLayout { Layout.fillWidth: true; spacing: 0
-                Text { Layout.fillWidth: true; text: root.selected ? root.peerLabel(root.selected) : (root.draftAlias !== "" ? root.draftAlias : root.shortKey(root.draftPeerKey)); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body; font.bold: true; elide: Text.ElideRight }
-                Text { Layout.fillWidth: true; text: root.selectedKey; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; elide: Text.ElideMiddle }
-              }
-            }
+
             Item {
               Layout.fillWidth: true; Layout.fillHeight: true
-              Text { anchors.centerIn: parent; visible: !root.hasSelection || root.selectedMessages.length === 0; text: !root.hasSelection ? "Select a conversation" : "No private messages yet"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+              Text { anchors.centerIn: parent; visible: !root.hasSelection || root.selectedMessages.length === 0; text: !root.hasSelection ? "Select a conversation" : (root.messageQuery !== "" ? "No matching messages" : "No private messages yet"); color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.body }
               ListView {
+                id: privateMessageList
                 anchors.fill: parent; visible: root.hasSelection; clip: true; model: root.selectedMessages; spacing: Style.space(6); boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                 delegate: Rectangle {
                   required property var modelData
-                  width: ListView.view.width; implicitHeight: privateBody.implicitHeight + Style.space(16); radius: Style.cornerRadius
+                  width: ListView.view.width
+                  implicitHeight: privateMessageContent.implicitHeight + Style.space(16)
+                  radius: Style.cornerRadius
                   color: modelData.outgoing ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.12) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06)
-                  Text { id: privateBody; anchors.left: parent.left; anchors.right: parent.right; anchors.margins: Style.space(8); text: String(modelData.body || modelData.text || ""); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body; wrapMode: Text.WrapAnywhere }
+
+                  ColumnLayout {
+                    id: privateMessageContent
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: Style.space(8)
+                    spacing: Style.space(3)
+
+                    Text {
+                      Layout.fillWidth: true
+                      text: String(modelData.body || modelData.text || "")
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      wrapMode: Text.WrapAnywhere
+                    }
+
+                    Text {
+                      Layout.alignment: Qt.AlignRight
+                      text: Qt.formatTime(new Date(Number(modelData.timestampMs || 0)), "HH:mm")
+                      color: root.dim
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
                 }
               }
             }
-            RowLayout {
+            PanelSeparator {
               visible: root.hasSelection
               Layout.fillWidth: true
-              TextField { id: composer; Layout.fillWidth: true; placeholderText: root.selectedOnline ? "Private message" : "Peer is offline"; enabled: root.selectedOnline && !root.value("privateSending", false); font.family: root.fontFamily; onAccepted: root.sendCurrent() }
-              Button { text: root.value("privateSending", false) ? "Sending…" : "Send"; enabled: root.selectedOnline && composer.text.trim() !== "" && !root.value("privateSending", false); onClicked: root.sendCurrent() }
+              foreground: root.foreground
             }
-            Text { visible: root.hasSelection; Layout.fillWidth: true; text: root.selectedOnline ? "Text only · addressed to the canonical peer key · aliases are untrusted labels" : "This discovered peer is offline; its conversation remains available"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+
+            TextField {
+              id: composer
+              visible: root.hasSelection
+              Layout.fillWidth: true
+              placeholderText: root.value("privateSending", false) ? "Sending…" : (root.selectedOnline ? "Private message" : "Peer is offline")
+              enabled: root.selectedOnline && !root.value("privateSending", false)
+              font.family: root.fontFamily
+              onAccepted: root.sendCurrent()
+            }
           }
         }
       }

@@ -81,6 +81,7 @@ Panel {
     { label: "PRIVATE", bindings: [
       { key: "Esc", action: "Return to group chat or conversation list" },
       { key: "Ctrl+D", action: "Toggle private messages / group chat" },
+      { key: "Ctrl+F", action: "Search the selected conversation" },
       { key: "↑ / ↓", action: "Move through conversations" },
       { key: "Enter", action: "Open a conversation or send text" },
       { key: "Ctrl+K", action: "Open key bindings" }
@@ -199,6 +200,7 @@ Panel {
     helpOpen = false
     privateOpen = open
     if (open) {
+      privateSurface.setSearchOpen(false)
       settingsOpen = false
       clipboardOpen = false
       searchOpen = false
@@ -779,7 +781,14 @@ Panel {
   Shortcut {
     sequence: "Ctrl+F"
     context: Qt.ApplicationShortcut
-    enabled: root.opened && !root.settingsOpen && !root.clipboardOpen && !root.searchOpen
+    enabled: root.opened && root.privateOpen && !root.helpOpen
+    onActivated: privateSurface.toggleSearch()
+  }
+
+  Shortcut {
+    sequence: "Ctrl+F"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && !root.settingsOpen && !root.clipboardOpen && !root.privateOpen && !root.searchOpen
     onActivated: root.openSearch()
   }
 
@@ -2312,9 +2321,21 @@ Panel {
       id: privateSurface
       anchors.fill: parent
       z: 30
-      visible: root.privateOpen
+      visible: root.privateOpen || privateRotation.angle < 89.9
+      opacity: 1.0 - privateRotation.angle / 90.0
       active: root.privateOpen
       compact: root.panelWidthPercent === 25
+
+      transform: Rotation {
+        id: privateRotation
+        origin.x: privateSurface.width / 2
+        origin.y: privateSurface.height / 2
+        axis { x: 0; y: 1; z: 0 }
+        angle: root.privateOpen ? 0 : 90
+        Behavior on angle {
+          NumberAnimation { duration: 220; easing.type: Easing.InOutQuad }
+        }
+      }
       service: mesh
       foreground: root.foreground
       dim: root.dim

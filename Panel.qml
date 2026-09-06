@@ -40,6 +40,7 @@ Panel {
   property string pendingDownloadAttachmentId: ""
   property string attachmentPickerError: ""
   property string copiedAttachmentId: ""
+  property string messageCopyNotice: ""
   property string _attachmentPickerMode: ""
   property string _attachmentPickerOutput: ""
   property string _attachmentPickerError: ""
@@ -50,6 +51,8 @@ Panel {
   readonly property var spinnerFrames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   readonly property string spinnerFrame: spinnerFrames[spinnerIndex]
   readonly property var displayedMessages: filterMessages(mesh.messages, searchQuery).slice().reverse()
+  readonly property var focusedMessage: messageCursorActive && messageList.currentIndex >= 0
+    && messageList.currentIndex < displayedMessages.length ? displayedMessages[messageList.currentIndex] : null
   readonly property var displayedClipboard: filterClipboard(clipboardHistory, clipboardQuery)
   readonly property string clipboardHistoryPath: Quickshell.env("HOME") + "/.local/state/omarchy/clipboard-history.json"
   readonly property var helpTabs: [
@@ -61,6 +64,7 @@ Panel {
       { key: "Ctrl+S", action: "Open the status surface" },
       { key: "Ctrl+F", action: "Search messages" },
       { key: "Ctrl+C", action: "Clear the chat timeline" },
+      { key: "Ctrl+Alt+C", action: "Copy the focused message" },
       { key: "↑ / ↓", action: "Move through messages" },
       { key: "Enter", action: "Send or share the focused item" }
     ] },
@@ -371,6 +375,17 @@ Panel {
     else next = Math.max(0, Math.min(messageList.count - 1, next + delta))
     messageList.currentIndex = next
     messageList.positionViewAtIndex(next, ListView.Contain)
+  }
+
+  function copyFocusedMessage() {
+    var item = focusedMessage
+    if (!item || String(item.itemKind || "text") === "attachment") return false
+    var text = String(item.body || "")
+    if (text === "") return false
+    Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(text) + " | wl-copy"])
+    messageCopyNotice = "Message copied"
+    messageCopyNoticeClear.restart()
+    return true
   }
 
   function openSearch() {
@@ -830,6 +845,16 @@ Panel {
   }
 
   Shortcut {
+    sequence: "Ctrl+Alt+C"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && !root.settingsOpen && !root.clipboardOpen && !root.privateOpen
+      && !root.helpOpen && root.focusedMessage !== null
+      && String(root.focusedMessage.itemKind || "text") !== "attachment"
+      && String(root.focusedMessage.body || "") !== ""
+    onActivated: root.copyFocusedMessage()
+  }
+
+  Shortcut {
     sequence: "Ctrl+Shift+V"
     context: Qt.ApplicationShortcut
     enabled: root.opened
@@ -893,6 +918,13 @@ Panel {
     interval: 1200
     repeat: false
     onTriggered: root.copiedAttachmentId = ""
+  }
+
+  Timer {
+    id: messageCopyNoticeClear
+    interval: 1200
+    repeat: false
+    onTriggered: root.messageCopyNotice = ""
   }
 
   Timer {
@@ -1086,9 +1118,10 @@ Panel {
 
       Text {
         visible: mesh.actionStatus !== "" || mesh.lastError !== "" || root.attachmentPickerError !== ""
+          || root.messageCopyNotice !== ""
         Layout.fillWidth: true
         text: root.attachmentPickerError !== "" ? root.attachmentPickerError
-          : (mesh.lastError !== "" ? mesh.lastError : mesh.actionStatus)
+          : (mesh.lastError !== "" ? mesh.lastError : (mesh.actionStatus !== "" ? mesh.actionStatus : root.messageCopyNotice))
         color: root.attachmentPickerError !== "" || mesh.lastError !== "" ? root.urgent : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.bodySmall

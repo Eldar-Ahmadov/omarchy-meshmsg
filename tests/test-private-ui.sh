@@ -42,5 +42,9 @@ grep -q 'unreadCount' "$UI"
 grep -q 'id: privateRotation' "$PANEL"
 grep -q 'visible: root.privateOpen || privateRotation.angle < 89.9' "$PANEL"
 grep -q 'angle: root.privateOpen ? 0 : 90' "$PANEL"
+grep -q 'sequence: "Ctrl+Alt+C"' "$PANEL"
+grep -q 'copyFocusedMessage()' "$PANEL"
+grep -q 'messageCopyNotice = "Message copied"' "$PANEL"
+grep -q 'id: messageCopyNoticeClear' "$PANEL"
 
 echo 'private messaging UI tests: PASS'

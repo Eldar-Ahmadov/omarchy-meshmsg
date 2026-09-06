@@ -573,6 +573,21 @@ Item {
     return true
   }
 
+  function removeMessage(timelineId) {
+    var id = String(timelineId || "")
+    if (id === "" || (attachmentBusy && id === _activeAttachmentId)) return false
+    for (var i = 0; i < messages.length; i++) {
+      var item = messages[i] || {}
+      if (String(item.id || "") !== id) continue
+      if (String(item.itemKind || "") === "attachment") forgetOffer(id)
+      var next = messages.slice(0)
+      next.splice(i, 1)
+      messages = next
+      return true
+    }
+    return false
+  }
+
   function clearMessages() {
     messages = []
     _attachmentOffers = ({})

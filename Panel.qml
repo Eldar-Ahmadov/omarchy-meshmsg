@@ -1286,7 +1286,7 @@ Panel {
                   id: messageBody
                   visible: !messageDelegate.isAttachment
                   width: parent.width
-                  rightPadding: Style.space(30)
+                  rightPadding: Style.space(58)
                   topPadding: Style.space(3)
                   bottomPadding: Style.space(2)
                   text: String(modelData.body || "")
@@ -1405,49 +1405,89 @@ Panel {
                 }
               }
 
-              Rectangle {
-                id: copyButton
+              Row {
+                id: messageActions
                 visible: !messageDelegate.isAttachment
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.margins: Style.space(7)
-                width: Style.space(22)
-                height: width
-                radius: Style.space(3)
-                opacity: bubbleHover.hovered || copyMouse.containsMouse || messageDelegate.copied ? 1 : 0
+                spacing: Style.space(4)
+                opacity: bubbleHover.hovered || copyMouse.containsMouse || deleteMouse.containsMouse
+                  || messageDelegate.copied ? 1 : 0
                 enabled: opacity > 0
-                color: copyMouse.containsMouse
-                  ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
-                  : "transparent"
-                border.width: 1
-                border.color: messageDelegate.copied
-                  ? root.accent
-                  : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
 
                 Behavior on opacity {
                   NumberAnimation { duration: 120 }
                 }
 
-                Text {
-                  anchors.centerIn: parent
-                  text: messageDelegate.copied ? "✓" : "󰆏"
-                  color: messageDelegate.copied ? root.accent : root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
+                Rectangle {
+                  width: Style.space(22)
+                  height: width
+                  radius: Style.space(3)
+                  color: copyMouse.containsMouse
+                    ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+                    : "transparent"
+                  border.width: 1
+                  border.color: messageDelegate.copied
+                    ? root.accent
+                    : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+
+                  Text {
+                    anchors.centerIn: parent
+                    text: messageDelegate.copied ? "✓" : "󰆏"
+                    color: messageDelegate.copied ? root.accent : root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  MouseArea {
+                    id: copyMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: messageDelegate.copyMessage()
+                  }
+
+                  PanelToolTip {
+                    visible: copyMouse.containsMouse
+                    text: messageDelegate.copied ? "Copied" : "Copy message"
+                    fontFamily: root.fontFamily
+                  }
                 }
 
-                MouseArea {
-                  id: copyMouse
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: messageDelegate.copyMessage()
-                }
+                Rectangle {
+                  width: Style.space(22)
+                  height: width
+                  radius: Style.space(3)
+                  color: deleteMouse.containsMouse
+                    ? Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.14)
+                    : "transparent"
+                  border.width: 1
+                  border.color: deleteMouse.containsMouse
+                    ? root.urgent
+                    : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
 
-                PanelToolTip {
-                  visible: copyMouse.containsMouse
-                  text: messageDelegate.copied ? "Copied" : "Copy message"
-                  fontFamily: root.fontFamily
+                  Text {
+                    anchors.centerIn: parent
+                    text: "󰆴"
+                    color: deleteMouse.containsMouse ? root.urgent : root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  MouseArea {
+                    id: deleteMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: mesh.removeMessage(modelData.id)
+                  }
+
+                  PanelToolTip {
+                    visible: deleteMouse.containsMouse
+                    text: "Delete from timeline"
+                    fontFamily: root.fontFamily
+                  }
                 }
               }
             }

@@ -361,7 +361,7 @@ Item {
   }
 
   function applyPeersSnapshot(event) {
-    if (Number(event.schema_version) !== 1 || !Array.isArray(event.peers) || !event.self || typeof event.self !== "object") return false
+    if ((Number(event.schema_version) !== 1 && Number(event.schema_version) !== 2) || !Array.isArray(event.peers) || !event.self || typeof event.self !== "object") return false
     if (!canonicalPeer(event.self.public_key) || typeof event.self.online !== "boolean"
         || (event.self.alias !== null && event.self.alias !== undefined && typeof event.self.alias !== "string")) return false
     var next = [], seen = {}
@@ -377,7 +377,7 @@ Item {
   }
 
   function applyPeerLifecycle(event, expired) {
-    if (Number(event.schema_version) !== 1) return false
+    if (Number(event.schema_version) !== 1 && Number(event.schema_version) !== 2) return false
     var item = directoryPeer(event.peer, expired)
     if (!item) return false
     var next = [], replaced = false

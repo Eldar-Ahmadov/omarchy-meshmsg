@@ -27,7 +27,10 @@ Item {
   property int advertisedAliases: 0
   property var ipcCapabilities: []
   readonly property bool privateSendAvailable: ipcCapabilities.indexOf("private_send_v1") !== -1
-  readonly property bool peerDirectoryAvailable: ipcCapabilities.indexOf("peer_directory_v1") !== -1
+  // meshmsg v0.1.16 advertises the peer directory as v2. Keep v1 for
+  // compatibility with older daemons supported by this plugin.
+  readonly property bool peerDirectoryAvailable: ipcCapabilities.indexOf("peer_directory_v2") !== -1
+    || ipcCapabilities.indexOf("peer_directory_v1") !== -1
   property double statusUpdatedAt: 0
   readonly property string stateDir: {
     var configured = Quickshell.env("MESHMSG_STATE_DIR")
@@ -361,7 +364,10 @@ Item {
   }
 
   function applyPeersSnapshot(event) {
-    if ((Number(event.schema_version) !== 1 && Number(event.schema_version) !== 2) || !Array.isArray(event.peers) || !event.self || typeof event.self !== "object") return false
+    // The peer directory schema was bumped from v1 to v2 without changing
+    // the fields consumed by the UI.
+    if ((Number(event.schema_version) !== 1 && Number(event.schema_version) !== 2)
+        || !Array.isArray(event.peers) || !event.self || typeof event.self !== "object") return false
     if (!canonicalPeer(event.self.public_key) || typeof event.self.online !== "boolean"
         || (event.self.alias !== null && event.self.alias !== undefined && typeof event.self.alias !== "string")) return false
     var next = [], seen = {}

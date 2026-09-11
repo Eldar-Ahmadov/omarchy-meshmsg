@@ -7,7 +7,7 @@ An Omarchy bar widget and chat panel backed by the local [`meshmsg`](https://git
 - live status and peer count
 - animated status surface with daemon, endpoint, topic, invite, bootstrap, identity, and IPC details
 - smoothly animated left, center, or right panel placement and 25%, 40%, or 50% screen-width sizing from the status/settings surface
-- keyboard shortcuts: `Ctrl+D` toggles private/group chat, `Ctrl+O` picks a file, `Ctrl+Shift+O` picks a folder, `Ctrl+Shift+V` toggles clipboard/chat, `Ctrl+S` toggles settings/chat, `C` copies the invite, and `Q` opens its QR code
+- keyboard shortcuts: `Ctrl+D` toggles private/group chat, `Ctrl+Delete` deletes the focused group message, `Ctrl+O` picks a file, `Ctrl+Shift+O` picks a folder, `Ctrl+Shift+V` toggles clipboard/chat, `Ctrl+S` toggles settings/chat, `C` copies the invite, and `Q` opens its QR code
 - a separate peer-list/private-chat surface with authoritative peer discovery on meshmsg v0.1.14+, alias-only peer selection, per-conversation text search, and a compact 25% drill-in layout
 - latest-first incoming and outgoing chat messages with hover actions to copy or delete individual messages
 - explicit file and folder-snapshot sharing with inline transfer cards and progress

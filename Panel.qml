@@ -54,6 +54,8 @@ Panel {
   readonly property var focusedMessage: messageCursorActive && messageList.currentIndex >= 0
     && messageList.currentIndex < displayedMessages.length ? displayedMessages[messageList.currentIndex] : null
   readonly property var displayedClipboard: filterClipboard(clipboardHistory, clipboardQuery)
+  readonly property var selectedClipboardEntry: clipboardIndex >= 0 && clipboardIndex < displayedClipboard.length
+    ? displayedClipboard[clipboardIndex] : null
   readonly property string clipboardHistoryPath: Quickshell.env("HOME") + "/.local/state/omarchy/clipboard-history.json"
   readonly property var helpTabs: [
     { label: "CHAT", bindings: [
@@ -65,6 +67,7 @@ Panel {
       { key: "Ctrl+F", action: "Search messages" },
       { key: "Ctrl+C", action: "Clear the chat timeline" },
       { key: "Ctrl+Alt+C", action: "Copy the focused message" },
+      { key: "Ctrl+Delete", action: "Delete the focused message" },
       { key: "↑ / ↓", action: "Move through messages" },
       { key: "Enter", action: "Send or share the focused item" }
     ] },
@@ -388,6 +391,24 @@ Panel {
     return true
   }
 
+  function deleteFocusedMessage() {
+    var item = focusedMessage
+    if (!item) return false
+    var deletedIndex = messageList.currentIndex
+    if (!mesh.removeMessage(item.id)) return false
+    Qt.callLater(function() {
+      if (messageList.count === 0) {
+        root.messageCursorActive = false
+        messageList.currentIndex = -1
+        return
+      }
+      root.messageCursorActive = true
+      messageList.currentIndex = Math.min(deletedIndex, messageList.count - 1)
+      messageList.positionViewAtIndex(messageList.currentIndex, ListView.Contain)
+    })
+    return true
+  }
+
   function openSearch() {
     searchOpen = true
     messageCursorActive = false
@@ -401,6 +422,11 @@ Panel {
     if (mesh.running) Qt.callLater(function() { messageField.forceActiveFocus() })
   }
 
+  function clipboardImageSource(text) {
+    var match = String(text || "").match(/<img\b[^>]*\bsrc\s*=\s*["'](data:image\/[^"']+)["'][^>]*>/i)
+    return match ? match[1] : ""
+  }
+
   function parseClipboardHistory(raw) {
     var rows = []
     try {
@@ -411,9 +437,11 @@ Panel {
         if (String(entry.type || "") !== "text") continue
         var text = String(entry.text || "")
         if (text.trim() === "") continue
+        var previewImage = clipboardImageSource(text)
         rows.push({
           fullText: text,
-          previewText: text.replace(/\s+/g, " ").trim()
+          previewText: previewImage !== "" ? "Image" : text.replace(/\s+/g, " ").trim(),
+          previewImage: previewImage
         })
       }
     } catch (error) {
@@ -852,6 +880,14 @@ Panel {
       && String(root.focusedMessage.itemKind || "text") !== "attachment"
       && String(root.focusedMessage.body || "") !== ""
     onActivated: root.copyFocusedMessage()
+  }
+
+  Shortcut {
+    sequence: "Ctrl+Delete"
+    context: Qt.ApplicationShortcut
+    enabled: root.opened && !root.settingsOpen && !root.clipboardOpen && !root.privateOpen
+      && !root.helpOpen && root.focusedMessage !== null
+    onActivated: root.deleteFocusedMessage()
   }
 
   Shortcut {
@@ -2250,13 +2286,34 @@ Panel {
                 required property var modelData
                 width: clipboardList.width
                 height: Style.space(48)
+                clip: true
                 color: index === root.clipboardIndex
                   ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.20)
                   : "transparent"
 
+                Image {
+                  id: clipboardThumbnail
+                  visible: String(modelData.previewImage || "") !== ""
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: visible ? Math.min(Style.space(36), parent.height - Style.space(8)) : 0
+                  height: width
+                  source: String(modelData.previewImage || "")
+                  sourceSize.width: width
+                  sourceSize.height: height
+                  fillMode: Image.PreserveAspectFit
+                  asynchronous: true
+                  smooth: true
+                }
+
                 Text {
-                  anchors.fill: parent
-                  anchors.leftMargin: Style.space(12)
+                  textFormat: Text.PlainText
+                  anchors.left: clipboardThumbnail.visible ? clipboardThumbnail.right : parent.left
+                  anchors.right: parent.right
+                  anchors.top: parent.top
+                  anchors.bottom: parent.bottom
+                  anchors.leftMargin: clipboardThumbnail.visible ? Style.space(8) : Style.space(12)
                   anchors.rightMargin: Style.space(12)
                   text: modelData.previewText
                   color: index === root.clipboardIndex ? root.foreground : root.dim
@@ -2314,6 +2371,7 @@ Panel {
             Flickable {
               anchors.fill: parent
               anchors.margins: Style.space(14)
+              visible: !root.selectedClipboardEntry || String(root.selectedClipboardEntry.previewImage || "") === ""
               contentWidth: width
               contentHeight: clipboardPreview.implicitHeight
               clip: true
@@ -2322,15 +2380,28 @@ Panel {
 
               Text {
                 id: clipboardPreview
+                textFormat: Text.PlainText
                 width: parent.width
-                text: root.displayedClipboard.length > 0 && root.clipboardIndex < root.displayedClipboard.length
-                  ? root.displayedClipboard[root.clipboardIndex].fullText : ""
+                text: root.selectedClipboardEntry ? root.selectedClipboardEntry.fullText : ""
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
                 wrapMode: Text.WrapAnywhere
                 renderType: Text.NativeRendering
               }
+            }
+
+            Image {
+              visible: root.selectedClipboardEntry && String(root.selectedClipboardEntry.previewImage || "") !== ""
+              anchors.fill: parent
+              anchors.margins: Style.space(14)
+              source: visible ? String(root.selectedClipboardEntry.previewImage) : ""
+              sourceSize.width: width
+              sourceSize.height: height
+              fillMode: Image.PreserveAspectFit
+              verticalAlignment: Image.AlignTop
+              asynchronous: true
+              smooth: true
             }
           }
         }

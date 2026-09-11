@@ -45,6 +45,9 @@ grep -q 'angle: root.privateOpen ? 0 : 90' "$PANEL"
 grep -q 'sequence: "Ctrl+Alt+C"' "$PANEL"
 grep -q 'copyFocusedMessage()' "$PANEL"
 grep -q 'messageCopyNotice = "Message copied"' "$PANEL"
+grep -q 'sequence: "Ctrl+Delete"' "$PANEL"
+grep -q 'deleteFocusedMessage()' "$PANEL"
+grep -q 'mesh.removeMessage(item.id)' "$PANEL"
 grep -q 'id: messageCopyNoticeClear' "$PANEL"
 
 echo 'private messaging UI tests: PASS'

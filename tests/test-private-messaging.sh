@@ -7,7 +7,7 @@ trap 'rm -rf "$TMP"' EXIT
 # Security invariants that must remain obvious in the backend.
 grep -q '"send", "--to", to, "--message-stdin"' "$ROOT/Service.qml"
 ! grep -q 'sendMessage(.*recipient' "$ROOT/Service.qml"
-grep -q 'keys !== expected' "$ROOT/Service.qml"
+grep -q 'keys !== currentExpected' "$ROOT/Service.qml"
 grep -q 'privateSendAvailable' "$ROOT/Service.qml"
 grep -q 'privateMessageAccepted(requested, value.to)' "$ROOT/Service.qml"
 
@@ -22,10 +22,11 @@ ShellRoot {
   Component.onCompleted: {
     var a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     var b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    service.parseStatus('{"type":"status","running":true,"peer":"' + b + '","alias":"build-node","alias_enabled":true,"captured_hostname":"host","custom_alias":"build-node","advertised_aliases":2,"ipc_capabilities":["private_send_v1"]}')
+    service.parseStatus('{"type":"status","schema_version":1,"request_id":"11111111111111111111111111111111","running":true,"peer":"' + b + '","alias":"build-node","alias_enabled":true,"captured_hostname":"host","custom_alias":"build-node","advertised_aliases":2,"max_attachment_bytes":4294967296,"ipc_capabilities":["typed_contracts_v1","private_send_v2","peer_directory_v2"]}')
     check(service.alias === "build-node" && service.aliasEnabled, "alias status was not parsed")
     check(service.privateSendAvailable && service.advertisedAliases === 2, "capability status was not parsed")
-    service.ipcCapabilities = ["private_send_v1", "peer_directory_v1"]
+    check(service.maxAttachmentBytes === 4294967296, "attachment limit was not parsed")
+    service.ipcCapabilities = ["typed_contracts_v1", "private_send_v2", "peer_directory_v2"]
     check(service.peerDirectoryAvailable, "peer directory capability was not exposed")
     check(service.applyPeersSnapshot({ type: "peers_snapshot", schema_version: 1, generated_at_ms: 9,
       self: { public_key: b, alias: "self", online: true }, peers: [

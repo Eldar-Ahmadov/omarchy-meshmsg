@@ -20,7 +20,7 @@ An Omarchy bar widget and chat panel backed by the local [`meshmsg`](https://git
 - copy the stored invite or display it as a scannable QR code
 - bounded in-memory message and attachment history (not persisted by the plugin)
 
-Private messaging is text-only in the panel: it has no attachment controls and does not claim trust, delivery, or read receipts. It is shown as unavailable, without affecting group chat, when the daemon does not advertise the `private_send_v1` IPC capability. On meshmsg v0.1.14+, the peer list follows the authoritative peer directory and distinguishes online and expired/offline entries. Discovered peers are selected by their advertised alias, while canonical keys remain the internal conversation identity. Advertised aliases are explicitly untrusted display labels.
+Private messaging is text-only in the panel: it has no attachment controls, offline delivery, durable storage, or read receipts. Meshmsg sends it over a separately encrypted, authenticated direct connection; a success acknowledges only acceptance by the recipient daemon. It is shown as unavailable, without affecting group chat, when the daemon does not advertise the `private_send_v2` IPC capability. The peer list follows the authoritative v2 peer directory and distinguishes online and expired/offline entries. Discovered peers are selected by their advertised alias, while canonical keys remain the internal conversation identity. Advertised aliases are explicitly untrusted display labels.
 
 The plugin uses meshmsg's current equal-peer command family, including `share` and `download --offer-stdin`. Attachment offers and transfer state remain in memory, so restarting the shell can discard undownloaded offers and in-progress UI state even though daemon-pinned blob data persists.
 
@@ -28,11 +28,11 @@ Starting the daemon installs and enables a persistent systemd user unit at `~/.c
 
 ## Security
 
-Meshmsg is currently a trusted **plaintext** swarm. Anyone with an invite can read messages and attachment offers and can send both. Shared attachment offers are reusable capabilities and currently cannot be revoked. Downloads are always user-initiated. The plugin passes invites through `join --token-stdin` and attachment offers through `download --offer-stdin`, keeping both out of process arguments and shell history.
+Broadcast messages and attachment offers are **plaintext** to everyone with the topic invite. Direct messages use a separately encrypted, authenticated connection, but have no offline delivery, durable storage, or read receipt. Shared attachment offers are reusable capabilities; their pinned data can be managed with meshmsg's `offers` commands. Downloads are always user-initiated. The plugin passes invites through `join --token-stdin` and attachment offers through `download --offer-stdin`, keeping both out of process arguments and shell history.
 
 ## Requirements
 
-- meshmsg v0.1.9 or newer (v0.1.14+ is required for UI peer discovery, and `private_send_v1` is required for private messages), preferably installed at `~/.local/bin/meshmsg`
+- meshmsg v0.1.20 or newer (`typed_contracts_v1`, attachment lifecycle v3, peer directory v2, and `private_send_v2`), preferably installed at `~/.local/bin/meshmsg`
 - Python, `fd`, `fzf`, and `xdg-terminal-exec` for the terminal attachment picker
 - a systemd user session
 - initialized or joined meshmsg state before starting, or an invite entered in the panel
@@ -43,7 +43,7 @@ Install the latest verified release with the upstream installer:
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/Eldar-Ahmadov/meshmsg/main/install.sh | bash
 ```
 
-The plugin capability-checks the installed binary for v0.1.9's attachment commands and secure `download --offer-stdin` input. Older binaries are reported as unavailable. Attachment selection runs as an `fd` + `fzf` fuzzy finder in the configured terminal; picker failures therefore report an error without taking down the Omarchy shell.
+The plugin checks the installed binary for attachment commands and secure `download --offer-stdin` input, then negotiates the daemon's advertised IPC capabilities. Older contract families remain accepted where their command shape is compatible. Attachment selection runs as an `fd` + `fzf` fuzzy finder in the configured terminal; picker failures therefore report an error without taking down the Omarchy shell.
 
 ## Persistent daemon
 

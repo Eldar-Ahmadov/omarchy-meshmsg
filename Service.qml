@@ -26,9 +26,10 @@ Item {
   property string customAlias: ""
   property int advertisedAliases: 0
   property var ipcCapabilities: []
-  readonly property bool privateSendAvailable: ipcCapabilities.indexOf("private_send_v1") !== -1
-  // meshmsg v0.1.16 advertises the peer directory as v2. Keep v1 for
-  // compatibility with older daemons supported by this plugin.
+  // v0.1.20 moved retry-safe private sends to the v2 capability and returns
+  // private_accepted v3. Retain the older token for compatible installations.
+  readonly property bool privateSendAvailable: ipcCapabilities.indexOf("private_send_v2") !== -1
+    || ipcCapabilities.indexOf("private_send_v1") !== -1
   readonly property bool peerDirectoryAvailable: ipcCapabilities.indexOf("peer_directory_v2") !== -1
     || ipcCapabilities.indexOf("peer_directory_v1") !== -1
   property double statusUpdatedAt: 0
@@ -103,7 +104,8 @@ Item {
   readonly property int maxPrivateMessages: boundedInt("maxPrivateMessages", maxMessages, 20, 500)
   readonly property int maxConversations: boundedInt("maxConversations", 50, 5, 200)
   readonly property int maxKnownPeers: boundedInt("maxKnownPeers", 100, 10, 500)
-  readonly property double maxAttachmentBytes: 1024 * 1024 * 1024
+  // Updated from status; v0.1.20 defaults to 4 GiB.
+  property double maxAttachmentBytes: 4 * 1024 * 1024 * 1024
 
   function boundedInt(name, fallback, minimum, maximum) {
     var value = settings && settings[name] !== undefined ? parseInt(settings[name], 10) : fallback
@@ -180,13 +182,20 @@ Item {
     var name = String(event.name || "")
     var offerId = String(event.offer_id || "")
     var size = Number(event.size)
-    if (Number(event.schema_version) !== 1) return false
+    var schema = Number(event.schema_version)
+    // Current meshmsg uses attachment_offer v2 and attachment_shared v3.
+    if (requireOffer ? (schema !== 1 && schema !== 2) : (schema !== 1 && schema !== 3)) return false
     if (kind !== "file" && kind !== "directory_tar_v1") return false
-    if (!/^[0-9a-fA-F]{32}$/.test(offerId) || name === "" || name.length > 255 || !isFinite(size) || size < 0 || size > maxAttachmentBytes) return false
+    if (!/^[0-9a-f]{32}$/.test(offerId) || name === "" || name.length > 255 || !isFinite(size) || size < 0 || size > maxAttachmentBytes) return false
     if (/[\\\/<>:"|?*\x00-\x1f\x7f]/.test(name) || name === "." || name === ".." || /[. ]$/.test(name)) return false
     var stem = name.split(".")[0].toUpperCase()
     if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem)) return false
     if (requireOffer && (String(event.offer || "") === "" || String(event.from || "") === "")) return false
+    if ((schema === 2 || schema === 3) && !/^[0-9a-f]{32}$/.test(String(event.request_id || ""))) return false
+    if (schema === 2 && (String(event.message_id || "") !== offerId || String(event.ticket || "") === "")) return false
+    if (schema === 3 && (String(event.operation_id || "") !== offerId
+        || String(event.message_id || "") !== offerId || String(event.ticket || "") === ""
+        || !/^[0-9a-f]{64}$/.test(String(event.source_digest || "")))) return false
     return true
   }
 
@@ -324,6 +333,8 @@ Item {
       capturedHostname = String(value.captured_hostname || "")
       customAlias = value.custom_alias === null || value.custom_alias === undefined ? "" : String(value.custom_alias)
       advertisedAliases = Math.max(0, Number(value.advertised_aliases || 0))
+      var advertisedMaximum = Number(value.max_attachment_bytes)
+      if (isFinite(advertisedMaximum) && advertisedMaximum > 0) maxAttachmentBytes = advertisedMaximum
       ipcCapabilities = Array.isArray(value.ipc_capabilities) ? value.ipc_capabilities.map(function(capability) { return String(capability) }) : []
       statusUpdatedAt = Date.now()
       statusText = !endpointOnline ? "Connecting…" : (!topicJoined ? "Waiting for peers" : "Connected")
@@ -428,7 +439,8 @@ Item {
         upsertAttachment(event, "outgoing", source === "attachment_command")
       } else if (type === "download_started") {
         var startedOutput = String(event.output || "")
-        if (_activeAttachmentOperation === "download"
+        if ((Number(event.schema_version) === 1 || Number(event.schema_version) === 2)
+            && _activeAttachmentOperation === "download"
             && startedOutput !== ""
             && startedOutput === _activeAttachmentOutput) {
           updateActiveAttachment({ state: "preparing_download", outputPath: startedOutput, error: "" })
@@ -437,14 +449,15 @@ Item {
         var progressOutput = String(event.output || "")
         var received = Number(event.received_bytes || 0)
         var total = Number(event.total_bytes || 0)
-        if (_activeAttachmentOperation === "download"
+        if ((Number(event.schema_version) === 1 || Number(event.schema_version) === 2)
+            && _activeAttachmentOperation === "download"
             && progressOutput !== ""
             && progressOutput === _activeAttachmentOutput
-            && isFinite(received) && isFinite(total) && received >= 0 && total >= 0) {
+            && isFinite(received) && isFinite(total) && received >= 0 && total >= 0 && received <= total) {
           updateActiveAttachment({
             state: "downloading",
             outputPath: progressOutput,
-            receivedBytes: Math.min(received, total),
+            receivedBytes: received,
             totalBytes: total,
             error: ""
           })
@@ -453,10 +466,15 @@ Item {
         var completedOfferId = String(event.offer_id || "")
         var completedOutput = String(event.output || "")
         var completedFrom = String(event.from || "")
+        var completionSchema = Number(event.schema_version)
+        var completionValid = completionSchema === 1 || (completionSchema === 2
+          && event.installed === true && event.pinned === true
+          && typeof event.destination_synced === "boolean" && typeof event.cleanup_complete === "boolean"
+          && Array.isArray(event.warnings))
         var activeDownloadId = _activeAttachmentOperation === "download"
           && completedOutput === _activeAttachmentOutput ? _activeAttachmentId : ""
         var completedIndex = attachmentIndex(completedOfferId, completedOutput, activeDownloadId, completedFrom)
-        if (Number(event.schema_version) === 1 && completedOutput !== "" && completedIndex >= 0) {
+        if (completionValid && completedOutput !== "" && completedIndex >= 0) {
           var finalOfferId = completedOfferId || String(messages[completedIndex].offerId || "")
           var completedTimelineId = String(messages[completedIndex].id || "")
           replaceTimelineItem(completedIndex, {
@@ -465,6 +483,9 @@ Item {
             outputPath: completedOutput,
             receivedBytes: Number(event.size || messages[completedIndex].size || 0),
             totalBytes: Number(event.size || messages[completedIndex].size || 0),
+            durabilityWarnings: completionSchema === 2 ? event.warnings.slice(0) : [],
+            destinationSynced: completionSchema === 2 ? event.destination_synced : true,
+            cleanupComplete: completionSchema === 2 ? event.cleanup_complete : true,
             error: ""
           })
           forgetOffer(completedTimelineId)
@@ -961,9 +982,15 @@ Item {
       try {
         var value = JSON.parse(String(root._privateSendOutput || "").trim())
         var keys = Object.keys(value).sort().join(",")
-        var expected = "acceptance_acknowledged,body_bytes,durable,message_id,read,schema_version,timestamp_ms,to,type"
+        var legacyExpected = "acceptance_acknowledged,body_bytes,durable,message_id,read,schema_version,timestamp_ms,to,type"
+        var currentExpected = "acceptance_acknowledged,body_bytes,duplicate_accepted,durable,message_id,operation_id,read,request_id,schema_version,timestamp_ms,to,type"
+        var current = value.schema_version === 3
         var timestamp = Number(value.timestamp_ms)
-        if (keys !== expected || value.type !== "private_accepted" || typeof value.schema_version !== "number" || value.schema_version !== 1
+        if ((keys !== legacyExpected && keys !== currentExpected) || value.type !== "private_accepted"
+            || (value.schema_version !== 1 && value.schema_version !== 3)
+            || (current && (keys !== currentExpected || value.operation_id !== value.message_id
+              || !/^[0-9a-f]{32}$/.test(String(value.request_id || "")) || typeof value.duplicate_accepted !== "boolean"))
+            || (!current && keys !== legacyExpected)
             || typeof value.to !== "string" || !root.canonicalPeer(value.to) || (root.canonicalPeer(requested) && value.to !== requested)
             || typeof value.message_id !== "string" || !/^[0-9a-f]{32}$/.test(value.message_id)
             || typeof value.timestamp_ms !== "number" || !isFinite(timestamp) || timestamp <= 0 || Math.floor(timestamp) !== timestamp

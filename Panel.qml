@@ -1310,7 +1310,11 @@ Panel {
               if (attachmentState === "preparing_download") return "Preparing download…"
               if (attachmentState === "queued") return "Preparing download…"
               if (attachmentState === "downloading") return "Downloading…"
-              if (attachmentState === "complete") return "Saved as " + root.pathName(modelData.outputPath)
+              if (attachmentState === "complete") {
+                var saved = "Saved as " + root.pathName(modelData.outputPath)
+                return modelData.durabilityWarnings && modelData.durabilityWarnings.length > 0
+                  ? saved + " · durability warning" : saved
+              }
               if (attachmentState === "failed") return String(modelData.error || "Attachment operation failed")
               return "Not downloaded · plaintext attachment"
             }

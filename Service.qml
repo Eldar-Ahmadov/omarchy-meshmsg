@@ -25,13 +25,13 @@ Item {
   property string capturedHostname: ""
   property string customAlias: ""
   property int advertisedAliases: 0
-  property var ipcCapabilities: []
-  // v0.1.20 moved retry-safe private sends to the v2 capability and returns
-  // private_accepted v3. Retain the older token for compatible installations.
-  readonly property bool privateSendAvailable: ipcCapabilities.indexOf("private_send_v2") !== -1
-    || ipcCapabilities.indexOf("private_send_v1") !== -1
-  readonly property bool peerDirectoryAvailable: ipcCapabilities.indexOf("peer_directory_v2") !== -1
-    || ipcCapabilities.indexOf("peer_directory_v1") !== -1
+  property int protocolVersion: 0
+  // Protocol v3 is one typed component boundary. Private send and the peer
+  // directory are mandatory rather than capability-negotiated.
+  readonly property bool privateSendAvailable: protocolVersion === 3
+  readonly property bool peerDirectoryAvailable: protocolVersion === 3
+  property string directoryEpoch: ""
+  property double directoryRevision: 0
   property double statusUpdatedAt: 0
   readonly property string stateDir: {
     var configured = Quickshell.env("MESHMSG_STATE_DIR")
@@ -104,7 +104,7 @@ Item {
   readonly property int maxPrivateMessages: boundedInt("maxPrivateMessages", maxMessages, 20, 500)
   readonly property int maxConversations: boundedInt("maxConversations", 50, 5, 200)
   readonly property int maxKnownPeers: boundedInt("maxKnownPeers", 100, 10, 500)
-  // Updated from status; v0.1.20 defaults to 4 GiB.
+  // Updated from protocol-v3 status; the current default is 4 GiB.
   property double maxAttachmentBytes: 4 * 1024 * 1024 * 1024
 
   function boundedInt(name, fallback, minimum, maximum) {
@@ -177,24 +177,25 @@ Item {
     return true
   }
 
+  function validProtocolFrame(value) {
+    return value && value.protocol_version === 3
+      && /^[0-9a-f]{32}$/.test(String(value.request_id || ""))
+  }
+
   function validAttachment(event, requireOffer) {
     var kind = String(event.kind || "")
     var name = String(event.name || "")
     var offerId = String(event.offer_id || "")
     var size = Number(event.size)
-    var schema = Number(event.schema_version)
-    // Current meshmsg uses attachment_offer v2 and attachment_shared v3.
-    if (requireOffer ? (schema !== 1 && schema !== 2) : (schema !== 1 && schema !== 3)) return false
+    if (!validProtocolFrame(event)) return false
     if (kind !== "file" && kind !== "directory_tar_v1") return false
     if (!/^[0-9a-f]{32}$/.test(offerId) || name === "" || name.length > 255 || !isFinite(size) || size < 0 || size > maxAttachmentBytes) return false
     if (/[\\\/<>:"|?*\x00-\x1f\x7f]/.test(name) || name === "." || name === ".." || /[. ]$/.test(name)) return false
     var stem = name.split(".")[0].toUpperCase()
     if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem)) return false
     if (requireOffer && (String(event.offer || "") === "" || String(event.from || "") === "")) return false
-    if ((schema === 2 || schema === 3) && !/^[0-9a-f]{32}$/.test(String(event.request_id || ""))) return false
-    if (schema === 2 && (String(event.message_id || "") !== offerId || String(event.ticket || "") === "")) return false
-    if (schema === 3 && (String(event.operation_id || "") !== offerId
-        || String(event.message_id || "") !== offerId || String(event.ticket || "") === ""
+    if (String(event.message_id || "") !== offerId || String(event.ticket || "") === "") return false
+    if (!requireOffer && (String(event.operation_id || "") !== offerId
         || !/^[0-9a-f]{64}$/.test(String(event.source_digest || "")))) return false
     return true
   }
@@ -308,7 +309,9 @@ Item {
     endpointOnline = false
     topicJoined = false
     neighbors = 0
-    ipcCapabilities = []
+    protocolVersion = 0
+    directoryEpoch = ""
+    directoryRevision = 0
     statusText = message || "Daemon stopped"
     if (listenProcess.running) listenProcess.running = false
   }
@@ -316,7 +319,7 @@ Item {
   function parseStatus(raw) {
     try {
       var value = JSON.parse(String(raw || "").trim())
-      if (value.type !== "status") throw new Error("unexpected status response")
+      if (value.type !== "status" || !validProtocolFrame(value)) throw new Error("unexpected status response")
       running = value.running === true
       endpointOnline = value.endpoint_online === true
       topicJoined = value.topic_joined === true
@@ -335,7 +338,7 @@ Item {
       advertisedAliases = Math.max(0, Number(value.advertised_aliases || 0))
       var advertisedMaximum = Number(value.max_attachment_bytes)
       if (isFinite(advertisedMaximum) && advertisedMaximum > 0) maxAttachmentBytes = advertisedMaximum
-      ipcCapabilities = Array.isArray(value.ipc_capabilities) ? value.ipc_capabilities.map(function(capability) { return String(capability) }) : []
+      protocolVersion = Number(value.protocol_version)
       statusUpdatedAt = Date.now()
       statusText = !endpointOnline ? "Connecting…" : (!topicJoined ? "Waiting for peers" : "Connected")
       lastError = ""
@@ -375,9 +378,10 @@ Item {
   }
 
   function applyPeersSnapshot(event) {
-    // The peer directory schema was bumped from v1 to v2 without changing
-    // the fields consumed by the UI.
-    if ((Number(event.schema_version) !== 1 && Number(event.schema_version) !== 2)
+    var epoch = String(event.directory_epoch || "")
+    var revision = Number(event.directory_revision)
+    if (!validProtocolFrame(event) || !/^[0-9a-f]{32}$/.test(epoch)
+        || !isFinite(revision) || revision < 0 || Math.floor(revision) !== revision
         || !Array.isArray(event.peers) || !event.self || typeof event.self !== "object") return false
     if (!canonicalPeer(event.self.public_key) || typeof event.self.online !== "boolean"
         || (event.self.alias !== null && event.self.alias !== undefined && typeof event.self.alias !== "string")) return false
@@ -390,11 +394,21 @@ Item {
     }
     if (next.length > maxKnownPeers) next = next.slice(0, maxKnownPeers)
     knownPeers = next
+    directoryEpoch = epoch
+    directoryRevision = revision
     return true
   }
 
   function applyPeerLifecycle(event, expired) {
-    if (Number(event.schema_version) !== 1 && Number(event.schema_version) !== 2) return false
+    var epoch = String(event.directory_epoch || "")
+    var revision = Number(event.directory_revision)
+    if (!validProtocolFrame(event) || !/^[0-9a-f]{32}$/.test(epoch)
+        || epoch !== directoryEpoch || !isFinite(revision) || Math.floor(revision) !== revision
+        || revision !== directoryRevision + 1) {
+      refreshPeers()
+      return false
+    }
+    if (!event.peer || event.peer.online !== !expired) return false
     var item = directoryPeer(event.peer, expired)
     if (!item) return false
     var next = [], replaced = false
@@ -405,6 +419,7 @@ Item {
     if (!replaced && !expired) next.push(item)
     while (next.length > maxKnownPeers) next.pop()
     knownPeers = next
+    directoryRevision = revision
     return true
   }
 
@@ -413,6 +428,7 @@ Item {
     if (text === "") return
     try {
       var event = JSON.parse(text)
+      if (!validProtocolFrame(event)) throw new Error("unsupported protocol frame")
       var type = String(event.type || "")
       if (type === "message" || type === "queued") {
         appendMessage({
@@ -439,7 +455,7 @@ Item {
         upsertAttachment(event, "outgoing", source === "attachment_command")
       } else if (type === "download_started") {
         var startedOutput = String(event.output || "")
-        if ((Number(event.schema_version) === 1 || Number(event.schema_version) === 2)
+        if (/^[0-9a-f]{32}$/.test(String(event.operation_id || ""))
             && _activeAttachmentOperation === "download"
             && startedOutput !== ""
             && startedOutput === _activeAttachmentOutput) {
@@ -449,7 +465,7 @@ Item {
         var progressOutput = String(event.output || "")
         var received = Number(event.received_bytes || 0)
         var total = Number(event.total_bytes || 0)
-        if ((Number(event.schema_version) === 1 || Number(event.schema_version) === 2)
+        if (/^[0-9a-f]{32}$/.test(String(event.operation_id || ""))
             && _activeAttachmentOperation === "download"
             && progressOutput !== ""
             && progressOutput === _activeAttachmentOutput
@@ -466,11 +482,12 @@ Item {
         var completedOfferId = String(event.offer_id || "")
         var completedOutput = String(event.output || "")
         var completedFrom = String(event.from || "")
-        var completionSchema = Number(event.schema_version)
-        var completionValid = completionSchema === 1 || (completionSchema === 2
-          && event.installed === true && event.pinned === true
+        var completionValid = /^[0-9a-f]{32}$/.test(String(event.operation_id || ""))
+          && /^[0-9a-f]{64}$/.test(String(event.token_digest || ""))
+          && event.mode === "install" && event.installed === true && event.pinned === true
           && typeof event.destination_synced === "boolean" && typeof event.cleanup_complete === "boolean"
-          && Array.isArray(event.warnings))
+          && Array.isArray(event.warnings)
+          && (event.destination_synced === true && event.cleanup_complete === true || event.warnings.length > 0)
         var activeDownloadId = _activeAttachmentOperation === "download"
           && completedOutput === _activeAttachmentOutput ? _activeAttachmentId : ""
         var completedIndex = attachmentIndex(completedOfferId, completedOutput, activeDownloadId, completedFrom)
@@ -483,9 +500,9 @@ Item {
             outputPath: completedOutput,
             receivedBytes: Number(event.size || messages[completedIndex].size || 0),
             totalBytes: Number(event.size || messages[completedIndex].size || 0),
-            durabilityWarnings: completionSchema === 2 ? event.warnings.slice(0) : [],
-            destinationSynced: completionSchema === 2 ? event.destination_synced : true,
-            cleanupComplete: completionSchema === 2 ? event.cleanup_complete : true,
+            durabilityWarnings: event.warnings.slice(0),
+            destinationSynced: event.destination_synced,
+            cleanupComplete: event.cleanup_complete,
             error: ""
           })
           forgetOffer(completedTimelineId)
@@ -570,7 +587,7 @@ Item {
   function handlePrivateMessage(event) {
     var from = String(event.from || ""), id = String(event.message_id || "")
     var timestamp = Number(event.timestamp_ms), body = event.body
-    if (Number(event.schema_version) !== 1 || event.private !== true || !canonicalPeer(from)
+    if (!validProtocolFrame(event) || event.private !== true || !canonicalPeer(from)
         || !/^[0-9a-f]{32}$/.test(id) || typeof body !== "string"
         || !isFinite(timestamp) || timestamp <= 0 || event.acceptance_acknowledged !== true
         || event.durable !== false || event.read !== false) return false
@@ -982,15 +999,10 @@ Item {
       try {
         var value = JSON.parse(String(root._privateSendOutput || "").trim())
         var keys = Object.keys(value).sort().join(",")
-        var legacyExpected = "acceptance_acknowledged,body_bytes,durable,message_id,read,schema_version,timestamp_ms,to,type"
-        var currentExpected = "acceptance_acknowledged,body_bytes,duplicate_accepted,durable,message_id,operation_id,read,request_id,schema_version,timestamp_ms,to,type"
-        var current = value.schema_version === 3
+        var expected = "acceptance_acknowledged,body_bytes,duplicate_accepted,durable,message_id,operation_id,protocol_version,read,request_id,timestamp_ms,to,type"
         var timestamp = Number(value.timestamp_ms)
-        if ((keys !== legacyExpected && keys !== currentExpected) || value.type !== "private_accepted"
-            || (value.schema_version !== 1 && value.schema_version !== 3)
-            || (current && (keys !== currentExpected || value.operation_id !== value.message_id
-              || !/^[0-9a-f]{32}$/.test(String(value.request_id || "")) || typeof value.duplicate_accepted !== "boolean"))
-            || (!current && keys !== legacyExpected)
+        if (keys !== expected || value.type !== "private_accepted" || !root.validProtocolFrame(value)
+            || value.operation_id !== value.message_id || typeof value.duplicate_accepted !== "boolean"
             || typeof value.to !== "string" || !root.canonicalPeer(value.to) || (root.canonicalPeer(requested) && value.to !== requested)
             || typeof value.message_id !== "string" || !/^[0-9a-f]{32}$/.test(value.message_id)
             || typeof value.timestamp_ms !== "number" || !isFinite(timestamp) || timestamp <= 0 || Math.floor(timestamp) !== timestamp

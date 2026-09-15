@@ -97,15 +97,15 @@ ShellRoot {
   }
 
   Component.onCompleted: {
-    service.handleEvent('{"protocol_version":3,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"message","from":"peer","body":"hello","timestamp_ms":1}')
-    service.handleEvent('{"protocol_version":3,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"queued","from":"self","body":"sent"}')
-    var offer = '{"protocol_version":3,"type":"attachment_offer","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","from":"peer","message_id":"0123456789abcdef0123456789abcdef","timestamp_ms":2,"offer_id":"0123456789abcdef0123456789abcdef","kind":"file","name":"report.pdf","size":1234,"ticket":"ticket","offer":"signed-secret"}'
+    service.handleEvent('{"protocol_version":4,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"message","from":"peer","body":"hello","timestamp_ms":1}')
+    service.handleEvent('{"protocol_version":4,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"queued","from":"self","body":"sent"}')
+    var offer = '{"protocol_version":4,"type":"attachment_offer","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","from":"peer","message_id":"0123456789abcdef0123456789abcdef","timestamp_ms":2,"offer_id":"0123456789abcdef0123456789abcdef","kind":"file","name":"report.pdf","size":1234,"ticket":"ticket","offer":"signed-secret"}'
     service.handleEvent(offer)
     service.handleEvent(offer)
     check(service.messages.length === 3, "offer was not deduplicated")
     check(incomingCount === 2, "incoming activity counted outgoing or duplicate events")
     check(service.messages[2].state === "offered", "offer state is wrong")
-    var collidingOffer = '{"protocol_version":3,"type":"attachment_offer","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","from":"other-peer","message_id":"0123456789abcdef0123456789abcdef","timestamp_ms":3,"offer_id":"0123456789abcdef0123456789abcdef","kind":"file","name":"other.pdf","size":456,"ticket":"ticket","offer":"other-signed-secret"}'
+    var collidingOffer = '{"protocol_version":4,"type":"attachment_offer","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","from":"other-peer","message_id":"0123456789abcdef0123456789abcdef","timestamp_ms":3,"offer_id":"0123456789abcdef0123456789abcdef","kind":"file","name":"other.pdf","size":456,"ticket":"ticket","offer":"other-signed-secret"}'
     service.handleEvent(collidingOffer)
     check(service.messages.length === 4, "offers from different providers were incorrectly deduplicated")
     check(service.messages[2].id !== service.messages[3].id, "provider-scoped offers shared an identity")
@@ -113,16 +113,16 @@ ShellRoot {
     service._activeAttachmentId = service.messages[2].id
     service._activeAttachmentOperation = "download"
     service._activeAttachmentOutput = "/tmp/report.pdf"
-    service.handleEvent('{"protocol_version":3,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"download_started","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","output":"/tmp/report.pdf"}')
+    service.handleEvent('{"protocol_version":4,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"download_started","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","output":"/tmp/report.pdf"}')
     check(service.messages[2].state === "preparing_download", "started download did not update the active card")
-    service.handleEvent('{"protocol_version":3,"type":"download_progress","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","received_bytes":100,"total_bytes":1234,"output":"/tmp/report.pdf"}')
+    service.handleEvent('{"protocol_version":4,"type":"download_progress","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","received_bytes":100,"total_bytes":1234,"output":"/tmp/report.pdf"}')
     check(service.messages[2].state === "downloading", "progress did not update the active card")
-    service.handleEvent('{"protocol_version":3,"type":"download_complete","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","token_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","offer_id":"0123456789abcdef0123456789abcdef","kind":"file","name":"report.pdf","size":1234,"from":"peer","output":"/tmp/report.pdf","mode":"install","installed":true,"pinned":true,"destination_synced":true,"cleanup_complete":true,"warnings":[]}')
+    service.handleEvent('{"protocol_version":4,"type":"download_complete","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","token_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","offer_id":"0123456789abcdef0123456789abcdef","kind":"file","name":"report.pdf","size":1234,"from":"peer","output":"/tmp/report.pdf","mode":"install","installed":true,"pinned":true,"destination_synced":true,"cleanup_complete":true,"warnings":[]}')
     check(service.messages[2].state === "complete", "completion did not update the active card")
     service._activeAttachmentId = ""
     service._activeAttachmentOperation = ""
     service._activeAttachmentOutput = ""
-    service.handleEvent('{"protocol_version":3,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"download_started","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","output":"/tmp/report.pdf"}')
+    service.handleEvent('{"protocol_version":4,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"download_started","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","output":"/tmp/report.pdf"}')
     check(service.messages[2].state === "complete", "unrelated start event regressed a completed card")
     service.handleEvent(offer)
     check(service.messages[2].state === "complete", "duplicate offer regressed completed state")
@@ -130,14 +130,14 @@ ShellRoot {
     service._activeAttachmentId = service.messages[3].id
     service._activeAttachmentOperation = "download"
     service._activeAttachmentOutput = "/tmp/report.pdf"
-    service.handleEvent('{"protocol_version":3,"type":"download_progress","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","received_bytes":50,"total_bytes":456,"output":"/tmp/report.pdf"}')
+    service.handleEvent('{"protocol_version":4,"type":"download_progress","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","received_bytes":50,"total_bytes":456,"output":"/tmp/report.pdf"}')
     check(service.messages[2].state === "complete", "progress regressed an older card sharing the output path")
     check(service.messages[3].state === "downloading", "progress did not prefer the active card")
-    service.handleEvent('{"protocol_version":3,"type":"attachment_offer","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","from":"peer","message_id":"fedcba9876543210fedcba9876543210","offer_id":"fedcba9876543210fedcba9876543210","kind":"file","name":"../unsafe","size":1,"ticket":"ticket","offer":"DO_NOT_LOG_THIS_CAPABILITY"}')
+    service.handleEvent('{"protocol_version":4,"type":"attachment_offer","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","from":"peer","message_id":"fedcba9876543210fedcba9876543210","offer_id":"fedcba9876543210fedcba9876543210","kind":"file","name":"../unsafe","size":1,"ticket":"ticket","offer":"DO_NOT_LOG_THIS_CAPABILITY"}')
     check(service.messages.length === 4, "unsafe offer became actionable")
     service.handleEvent('{"type":"attachment_offer","offer":"DO_NOT_LOG_THIS_MALFORMED_CAPABILITY"')
     for (var i = 0; i < 25; i++)
-      service.handleEvent('{"protocol_version":3,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"message","from":"peer","body":"bounded-' + i + '","timestamp_ms":' + (10 + i) + '}')
+      service.handleEvent('{"protocol_version":4,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"message","from":"peer","body":"bounded-' + i + '","timestamp_ms":' + (10 + i) + '}')
     check(service.messages.length === 20, "timeline did not stay bounded")
     check(incomingCount === 28, "incoming activity stopped at the timeline cap")
     console.log("ATTACHMENT_SERVICE_TEST_PASS")
@@ -168,7 +168,7 @@ printf '\n' >>"$TEST_ARGS"
 [[ ${1:-} == --json ]]
 case ${2:-} in
   share)
-    printf '%s\n' '{"protocol_version":3,"type":"attachment_shared","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","operation_id":"11111111111111111111111111111111","from":"self","message_id":"11111111111111111111111111111111","timestamp_ms":2,"offer_id":"11111111111111111111111111111111","source_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","kind":"file","name":"source.txt","size":7,"ticket":"ticket","offer":"outgoing-capability","delivery_acknowledged":false}'
+    printf '%s\n' '{"protocol_version":4,"type":"attachment_shared","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","operation_id":"11111111111111111111111111111111","from":"self","message_id":"11111111111111111111111111111111","timestamp_ms":2,"offer_id":"11111111111111111111111111111111","source_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","kind":"file","name":"source.txt","size":7,"ticket":"ticket","offer":"outgoing-capability","delivery_acknowledged":false}'
     ;;
   download)
     token=$(cat)
@@ -178,7 +178,7 @@ case ${2:-} in
       if [[ $1 == --output ]]; then output=$2; break; fi
       shift
     done
-    printf '{"protocol_version":3,"type":"download_complete","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","token_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","offer_id":"22222222222222222222222222222222","kind":"file","name":"received.txt","size":9,"from":"peer","output":"%s","mode":"install","installed":true,"pinned":true,"destination_synced":true,"cleanup_complete":true,"warnings":[]}\n' "$output"
+    printf '{"protocol_version":4,"type":"download_complete","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","operation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","token_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","offer_id":"22222222222222222222222222222222","kind":"file","name":"received.txt","size":9,"from":"peer","output":"%s","mode":"install","installed":true,"pinned":true,"destination_synced":true,"cleanup_complete":true,"warnings":[]}\n' "$output"
     ;;
   *) exit 2 ;;
 esac
@@ -205,7 +205,7 @@ ShellRoot {
       if (service.attachmentBusy) return
       if (testRoot.stage === 1) {
         check(service.messages.length === 1 && service.messages[0].state === "shared", "share process did not complete")
-        service.handleEvent('{"protocol_version":3,"type":"attachment_offer","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","from":"peer","message_id":"22222222222222222222222222222222","timestamp_ms":2,"offer_id":"22222222222222222222222222222222","kind":"file","name":"received.txt","size":9,"ticket":"ticket","offer":"signed-input-capability"}')
+        service.handleEvent('{"protocol_version":4,"type":"attachment_offer","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","from":"peer","message_id":"22222222222222222222222222222222","timestamp_ms":2,"offer_id":"22222222222222222222222222222222","kind":"file","name":"received.txt","size":9,"ticket":"ticket","offer":"signed-input-capability"}')
         testRoot.stage = 2
         check(service.prepareDownload(service.messages[1].id, "$TMP/custom"), "download did not start")
       } else if (testRoot.stage === 2) {

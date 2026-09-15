@@ -22,20 +22,20 @@ ShellRoot {
   Component.onCompleted: {
     var a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     var b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    service.parseStatus('{"protocol_version":3,"type":"status","request_id":"11111111111111111111111111111111","running":true,"peer":"' + b + '","alias":"build-node","alias_enabled":true,"captured_hostname":"host","custom_alias":"build-node","advertised_aliases":2,"max_attachment_bytes":4294967296}')
+    service.parseStatus('{"protocol_version":4,"type":"status","request_id":"11111111111111111111111111111111","running":true,"peer":"' + b + '","alias":"build-node","alias_enabled":true,"captured_hostname":"host","custom_alias":"build-node","advertised_aliases":2,"max_attachment_bytes":4294967296}')
     check(service.alias === "build-node" && service.aliasEnabled, "alias status was not parsed")
     check(service.privateSendAvailable && service.advertisedAliases === 2, "protocol features were not exposed")
     check(service.maxAttachmentBytes === 4294967296, "attachment limit was not parsed")
     check(service.peerDirectoryAvailable, "peer directory was not exposed")
-    check(service.applyPeersSnapshot({ protocol_version: 3, request_id: "11111111111111111111111111111111",
+    check(service.applyPeersSnapshot({ protocol_version: 4, request_id: "11111111111111111111111111111111",
       type: "peers_snapshot", generated_at_ms: 9, directory_epoch: "22222222222222222222222222222222", directory_revision: 1,
       self: { public_key: b, alias: "self", online: true }, peers: [
         { public_key: a, alias: "alice", online: true, last_seen_ms: 8, expires_at_ms: 100 }
       ] }), "valid peer snapshot was rejected")
     check(service.knownPeers.length === 1 && service.knownPeers[0].alias === "alice" && service.knownPeers[0].online, "peer snapshot was not modeled")
-    service.handleEvent('{"protocol_version":3,"request_id":"11111111111111111111111111111111","type":"peer_updated","directory_epoch":"22222222222222222222222222222222","directory_revision":2,"peer":{"public_key":"' + a + '","alias":"alice-2","online":true,"last_seen_ms":9,"expires_at_ms":101}}')
+    service.handleEvent('{"protocol_version":4,"request_id":"11111111111111111111111111111111","type":"peer_updated","directory_epoch":"22222222222222222222222222222222","directory_revision":2,"peer":{"public_key":"' + a + '","alias":"alice-2","online":true,"last_seen_ms":9,"expires_at_ms":101}}')
     check(service.knownPeers[0].alias === "alice-2", "peer update was not applied")
-    var event = '{"protocol_version":3,"request_id":"11111111111111111111111111111111","type":"private_message","private":true,"from":"' + a + '","message_id":"0123456789abcdef0123456789abcdef","timestamp_ms":10,"body":"secret","acceptance_acknowledged":true,"durable":false,"read":false}'
+    var event = '{"protocol_version":4,"request_id":"11111111111111111111111111111111","type":"private_message","private":true,"from":"' + a + '","message_id":"0123456789abcdef0123456789abcdef","timestamp_ms":10,"body":"secret","acceptance_acknowledged":true,"durable":false,"read":false}'
     service.handleEvent(event)
     service.handleEvent(event)
     check(service.privateMessages.length === 1, "private message was not deduplicated")
@@ -43,7 +43,7 @@ ShellRoot {
     check(service.conversations.length === 1 && service.conversations[0].unreadCount === 1, "conversation unread state is wrong")
     check(service.knownPeers.length === 1 && service.knownPeers[0].peer === a, "known peer was not modeled")
     check(service.markConversationRead(a) && service.privateUnreadCount === 0, "conversation could not be marked read")
-    service.handleEvent('{"protocol_version":3,"request_id":"11111111111111111111111111111111","type":"private_message","private":true,"from":"' + a + '","message_id":"fedcba9876543210fedcba9876543210","timestamp_ms":11,"body":"bad","acceptance_acknowledged":false,"durable":false,"read":false}')
+    service.handleEvent('{"protocol_version":4,"request_id":"11111111111111111111111111111111","type":"private_message","private":true,"from":"' + a + '","message_id":"fedcba9876543210fedcba9876543210","timestamp_ms":11,"body":"bad","acceptance_acknowledged":false,"durable":false,"read":false}')
     check(service.privateMessages.length === 1, "invalid private event was accepted")
     service.protocolVersion = 0
     service.running = true

@@ -26,10 +26,10 @@ Item {
   property string customAlias: ""
   property int advertisedAliases: 0
   property int protocolVersion: 0
-  // Protocol v3 is one typed component boundary. Private send and the peer
+  // Protocol v4 is one typed component boundary. Private send and the peer
   // directory are mandatory rather than capability-negotiated.
-  readonly property bool privateSendAvailable: protocolVersion === 3
-  readonly property bool peerDirectoryAvailable: protocolVersion === 3
+  readonly property bool privateSendAvailable: protocolVersion === 4
+  readonly property bool peerDirectoryAvailable: protocolVersion === 4
   property string directoryEpoch: ""
   property double directoryRevision: 0
   property double statusUpdatedAt: 0
@@ -104,7 +104,7 @@ Item {
   readonly property int maxPrivateMessages: boundedInt("maxPrivateMessages", maxMessages, 20, 500)
   readonly property int maxConversations: boundedInt("maxConversations", 50, 5, 200)
   readonly property int maxKnownPeers: boundedInt("maxKnownPeers", 100, 10, 500)
-  // Updated from protocol-v3 status; the current default is 4 GiB.
+  // Updated from protocol-v4 status; the current default is 4 GiB.
   property double maxAttachmentBytes: 4 * 1024 * 1024 * 1024
 
   function boundedInt(name, fallback, minimum, maximum) {
@@ -178,7 +178,7 @@ Item {
   }
 
   function validProtocolFrame(value) {
-    return value && value.protocol_version === 3
+    return value && value.protocol_version === 4
       && /^[0-9a-f]{32}$/.test(String(value.request_id || ""))
   }
 

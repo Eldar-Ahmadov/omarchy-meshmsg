@@ -8,7 +8,7 @@ An Omarchy bar widget and chat panel backed by the local [`meshmsg`](https://git
 - animated status surface with daemon, endpoint, topic, invite, bootstrap, and identity details
 - smoothly animated left, center, or right panel placement and 25%, 40%, or 50% screen-width sizing from the status/settings surface
 - keyboard shortcuts: `Ctrl+D` toggles private/group chat, `Ctrl+Delete` deletes the focused group message, `Ctrl+O` picks a file, `Ctrl+Shift+O` picks a folder, `Ctrl+Shift+V` toggles clipboard/chat, `Ctrl+S` toggles settings/chat, `C` copies the invite, and `Q` opens its QR code
-- a separate peer-list/private-chat surface with authoritative protocol-v3 peer discovery, alias-only peer selection, per-conversation text search, and a compact 25% drill-in layout
+- a separate peer-list/private-chat surface with authoritative protocol-v4 peer discovery, alias-only peer selection, per-conversation text search, and a compact 25% drill-in layout
 - latest-first incoming and outgoing chat messages, showing peer aliases with node-ID fallback, with hover actions to copy or delete individual messages
 - explicit file and folder-snapshot sharing with inline transfer cards and progress
 - collision-safe downloads to the XDG Downloads directory, with optional destination selection
@@ -20,7 +20,7 @@ An Omarchy bar widget and chat panel backed by the local [`meshmsg`](https://git
 - copy the stored invite or display it as a scannable QR code
 - bounded in-memory message and attachment history (not persisted by the plugin)
 
-Private messaging is text-only in the panel: it has no attachment controls, offline delivery, durable storage, or read receipts. Meshmsg sends it over a separately encrypted, authenticated direct connection; a success acknowledges only acceptance by the recipient daemon. The peer list follows the authoritative protocol-v3 peer directory and distinguishes online and expired/offline entries. Discovered peers are selected by their advertised alias, while canonical keys remain the internal conversation identity. Advertised aliases are explicitly untrusted display labels.
+Private messaging is text-only in the panel: it has no attachment controls, offline delivery, durable storage, or read receipts. Meshmsg sends it over a separately encrypted, authenticated direct connection; a success acknowledges only acceptance by the recipient daemon. The peer list follows the authoritative protocol-v4 peer directory and distinguishes online and expired/offline entries. Discovered peers are selected by their advertised alias, while canonical keys remain the internal conversation identity. Advertised aliases are explicitly untrusted display labels.
 
 The plugin uses meshmsg's current equal-peer command family, including `share` and `download --offer-stdin`. Attachment offers and transfer state remain in memory, so restarting the shell can discard undownloaded offers and in-progress UI state even though daemon-pinned blob data persists.
 
@@ -32,7 +32,7 @@ Broadcast messages and attachment offers are **plaintext** to everyone with the 
 
 ## Requirements
 
-- meshmsg v0.1.22 or newer (strict local IPC protocol v3), preferably installed at `~/.local/bin/meshmsg`
+- meshmsg v0.1.23 or newer (strict local IPC protocol v4), preferably installed at `~/.local/bin/meshmsg`
 - Python, `fd`, `fzf`, and `xdg-terminal-exec` for the terminal attachment picker
 - a systemd user session
 - initialized or joined meshmsg state before starting, or an invite entered in the panel
@@ -43,7 +43,7 @@ Install the latest verified release with the upstream installer:
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/Eldar-Ahmadov/meshmsg/main/install.sh | bash
 ```
 
-The plugin checks the installed binary for attachment commands and secure `download --offer-stdin` input. It requires meshmsg's strict protocol-v3 responses and events; older local contract families are intentionally not accepted. Attachment selection runs as an `fd` + `fzf` fuzzy finder in the configured terminal; picker failures therefore report an error without taking down the Omarchy shell.
+The plugin checks the installed binary for attachment commands and secure `download --offer-stdin` input. It requires meshmsg's strict protocol-v4 responses and events; older local contract families are intentionally not accepted. Attachment selection runs as an `fd` + `fzf` fuzzy finder in the configured terminal; picker failures therefore report an error without taking down the Omarchy shell.
 
 ## Persistent daemon
 

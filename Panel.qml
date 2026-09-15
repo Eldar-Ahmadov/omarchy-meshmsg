@@ -173,6 +173,18 @@ Panel {
     return separator >= 0 ? value.substring(separator + 1) : value
   }
 
+  function senderLabel(item) {
+    var nodeId = String(item && item.from || "")
+    for (var i = 0; i < mesh.knownPeers.length; i++) {
+      var known = mesh.knownPeers[i] || {}
+      if (String(known.peer || known.publicKey || "") !== nodeId) continue
+      var alias = String(known.alias || "").trim()
+      if (alias !== "") return alias
+      break
+    }
+    return mesh.shortPeer(nodeId)
+  }
+
   function attachmentName(item) {
     var name = String(item && item.name || "Attachment")
     return String(item && item.attachmentKind || "") === "directory_tar_v1" && /\.tar$/i.test(name)
@@ -1402,7 +1414,7 @@ Panel {
 
                   Text {
                     Layout.fillWidth: true
-                    text: modelData.outgoing ? "YOU" : mesh.shortPeer(modelData.from)
+                    text: modelData.outgoing ? "YOU" : root.senderLabel(modelData)
                     color: modelData.outgoing ? root.accent : root.dim
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption

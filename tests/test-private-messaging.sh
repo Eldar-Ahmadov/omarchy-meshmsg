@@ -45,6 +45,26 @@ ShellRoot {
     check(service.markConversationRead(a) && service.privateUnreadCount === 0, "conversation could not be marked read")
     service.handleEvent('{"protocol_version":4,"request_id":"11111111111111111111111111111111","type":"private_message","private":true,"from":"' + a + '","message_id":"fedcba9876543210fedcba9876543210","timestamp_ms":11,"body":"bad","acceptance_acknowledged":false,"durable":false,"read":false}')
     check(service.privateMessages.length === 1, "invalid private event was accepted")
+    service.parseStatus(JSON.stringify({protocol_version: 5, type: "status", request_id: "11111111111111111111111111111111", peer: b, endpoint_online: true, topic_joined: true}))
+    check(service.running && service.statusText === "Connected" && !service.lastError, "v5 status without running was rejected")
+    check(service.privateSendAvailable && service.peerDirectoryAvailable, "v5 capabilities were not exposed")
+    var snapshot5 = { protocol_version: 5, request_id: "11111111111111111111111111111111",
+      type: "peers_snapshot", generated_at_ms: 9, directory_epoch: "22222222222222222222222222222222", directory_revision: 1,
+      self: { public_key: b, alias: "self", online: true }, peers: [
+        { public_key: a, alias: "alice", last_seen_ms: 8, expires_at_ms: 100 }
+      ] }
+    check(service.applyPeersSnapshot(snapshot5), "v5 snapshot without remote online was rejected")
+    check(service.knownPeers.length === 1 && service.knownPeers[0].online, "v5 peer was not online")
+    var transition5 = { protocol_version: 5, request_id: snapshot5.request_id, directory_epoch: snapshot5.directory_epoch,
+      directory_revision: 2, peer: { public_key: a, alias: "alice-5", last_seen_ms: 9, expires_at_ms: 101 } }
+    check(service.applyPeerLifecycle(transition5, false), "v5 peer update rejected")
+    check(service.knownPeers[0].alias === "alice-5", "v5 peer update not modeled")
+    transition5.directory_revision = 3
+    check(service.applyPeerLifecycle(transition5, true) && service.knownPeers.length === 0, "v5 expiration rejected")
+    snapshot5.protocol_version = 4
+    check(!service.applyPeersSnapshot(snapshot5), "v4 snapshot without online accepted")
+    check(service.validProtocolFrame({protocol_version: 5, request_id: "11111111111111111111111111111111"}), "v5 frame rejected")
+    check(!service.validProtocolFrame({protocol_version: 6, request_id: "11111111111111111111111111111111"}), "unknown protocol accepted")
     service.protocolVersion = 0
     service.running = true
     check(!service.sendPrivateMessage(a, "must not broadcast"), "private send was not capability gated")

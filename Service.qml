@@ -28,8 +28,8 @@ Item {
   property int protocolVersion: 0
   // Protocol v4 is one typed component boundary. Private send and the peer
   // directory are mandatory rather than capability-negotiated.
-  readonly property bool privateSendAvailable: protocolVersion === 4
-  readonly property bool peerDirectoryAvailable: protocolVersion === 4
+  readonly property bool privateSendAvailable: protocolVersion === 4 || protocolVersion === 5
+  readonly property bool peerDirectoryAvailable: protocolVersion === 4 || protocolVersion === 5
   property string directoryEpoch: ""
   property double directoryRevision: 0
   property double statusUpdatedAt: 0
@@ -178,7 +178,7 @@ Item {
   }
 
   function validProtocolFrame(value) {
-    return value && value.protocol_version === 4
+    return value && (value.protocol_version === 4 || value.protocol_version === 5)
       && /^[0-9a-f]{32}$/.test(String(value.request_id || ""))
   }
 
@@ -320,7 +320,8 @@ Item {
     try {
       var value = JSON.parse(String(raw || "").trim())
       if (value.type !== "status" || !validProtocolFrame(value)) throw new Error("unexpected status response")
-      running = value.running === true
+      // Protocol v5 status is only returned by a running daemon.
+      running = value.protocol_version === 5 || value.running === true
       endpointOnline = value.endpoint_online === true
       topicJoined = value.topic_joined === true
       neighbors = Number(value.neighbors || 0)
@@ -367,14 +368,14 @@ Item {
     return true
   }
 
-  function directoryPeer(raw, expired) {
+  function directoryPeer(raw, expired, frameVersion) {
     if (!raw || typeof raw !== "object") return null
     var key = String(raw.public_key || "")
     var seen = Number(raw.last_seen_ms), expires = Number(raw.expires_at_ms)
     if (!canonicalPeer(key) || key === peer || (raw.alias !== null && raw.alias !== undefined && typeof raw.alias !== "string")
-        || typeof raw.online !== "boolean" || !isFinite(seen) || seen < 0 || !isFinite(expires) || expires < seen) return null
+        || (frameVersion !== 5 && typeof raw.online !== "boolean") || !isFinite(seen) || seen < 0 || !isFinite(expires) || expires < seen) return null
     return { peer: key, publicKey: key, alias: raw.alias === null || raw.alias === undefined ? "" : String(raw.alias),
-      online: expired === true ? false : raw.online, lastSeenMs: seen, expiresAtMs: expires }
+      online: expired === true ? false : (frameVersion === 5 ? true : raw.online), lastSeenMs: seen, expiresAtMs: expires }
   }
 
   function applyPeersSnapshot(event) {
@@ -387,7 +388,7 @@ Item {
         || (event.self.alias !== null && event.self.alias !== undefined && typeof event.self.alias !== "string")) return false
     var next = [], seen = {}
     for (var i = 0; i < event.peers.length; i++) {
-      var item = directoryPeer(event.peers[i], false)
+      var item = directoryPeer(event.peers[i], false, event.protocol_version)
       if (!item || seen[item.peer]) return false
       seen[item.peer] = true
       next.push(item)
@@ -408,8 +409,8 @@ Item {
       refreshPeers()
       return false
     }
-    if (!event.peer || event.peer.online !== !expired) return false
-    var item = directoryPeer(event.peer, expired)
+    if (!event.peer || (event.protocol_version !== 5 && event.peer.online !== !expired)) return false
+    var item = directoryPeer(event.peer, expired, event.protocol_version)
     if (!item) return false
     var next = [], replaced = false
     for (var i = 0; i < knownPeers.length; i++) {

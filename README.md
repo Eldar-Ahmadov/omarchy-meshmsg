@@ -32,7 +32,7 @@ Broadcast messages and attachment offers are **plaintext** to everyone with the 
 
 ## Requirements
 
-- meshmsg v0.1.23 or newer (strict local IPC protocol v4), preferably installed at `~/.local/bin/meshmsg`
+- meshmsg v0.1.23 or newer (strict local IPC protocol v4 or v5), preferably installed at `~/.local/bin/meshmsg`
 - Python, `fd`, `fzf`, and `xdg-terminal-exec` for the terminal attachment picker
 - a systemd user session
 - initialized or joined meshmsg state before starting, or an invite entered in the panel
@@ -43,7 +43,7 @@ Install the latest verified release with the upstream installer:
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/Eldar-Ahmadov/meshmsg/main/install.sh | bash
 ```
 
-The plugin checks the installed binary for attachment commands and secure `download --offer-stdin` input. It requires meshmsg's strict protocol-v4 responses and events; older local contract families are intentionally not accepted. Attachment selection runs as an `fd` + `fzf` fuzzy finder in the configured terminal; picker failures therefore report an error without taking down the Omarchy shell.
+The plugin checks the installed binary for attachment commands and secure `download --offer-stdin` input. It accepts meshmsg's strict protocol-v4 and protocol-v5 responses and events; older local contract families and unknown future versions are intentionally not accepted. Attachment selection runs as an `fd` + `fzf` fuzzy finder in the configured terminal; picker failures therefore report an error without taking down the Omarchy shell.
 
 ## Persistent daemon
 
